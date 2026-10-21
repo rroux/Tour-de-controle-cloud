@@ -7,6 +7,7 @@ import path from "node:path";
 import { APP_DIR, DATA_DIR } from "./storage.js";
 import { addSource, deleteSource, getConfig, publicConfig, updateSettings, updateSource } from "./config.js";
 import { getHistory, getProjects, runScan, scanStatus, testSource } from "./scanner.js";
+import { acceptBudgetRefs } from "./budgetRef.js";
 import { nextRun, startScheduler } from "./scheduler.js";
 
 const PORT = Number(process.env.PORT || 3000);
@@ -19,6 +20,8 @@ app.use(express.json({ limit: "1mb" }));
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
 
 app.get("/api/projects", (req, res) => res.json(getProjects()));
+// Nouvelle version du CEP prise comme budget de référence : { keys?: [clé projet], year?: année }.
+app.post("/api/budget-refs/accept", (req, res) => res.json(acceptBudgetRefs(getProjects().projects, req.body || {})));
 
 app.get("/api/config", (req, res) => res.json({ ...publicConfig(), nextRun: nextRun(getConfig().schedule) }));
 app.put("/api/config", (req, res) => res.json({ ...updateSettings(req.body || {}), nextRun: nextRun(getConfig().schedule) }));

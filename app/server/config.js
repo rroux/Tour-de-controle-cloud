@@ -14,6 +14,8 @@ const DEFAULTS = {
   // Objectifs de taux de marge (base CA net). Par projet : taux de la trajectoire initiale du CEP,
   // `defaut` à défaut. Global (vues consolidées) : `auto` = objectifs des projets pondérés par le CA, sinon `global`.
   objective: { defaut: 0.25, mode: "auto", global: 0.25 },
+  // Exercice à partir duquel le budget est la référence figée de l'onglet CEP (avant : trajectoire initiale).
+  budgetRefYear: 2027,
 };
 
 // Premier lancement : une source « Exemples » pointe sur le dossier demo/ pour voir l'application remplie.
@@ -87,6 +89,7 @@ export function updateSettings(body) {
       global: rate(body.objective.global, config.objective.global),
     };
   }
+  if (Number.isInteger(Number(body.budgetRefYear)) && Number(body.budgetRefYear) >= 2000 && Number(body.budgetRefYear) <= 2100) config.budgetRefYear = Number(body.budgetRefYear);
   if (typeof body.onlyModified === "boolean") config.onlyModified = body.onlyModified;
   if (Number.isFinite(Number(body.staleDays)) && Number(body.staleDays) > 0) config.staleDays = Math.round(Number(body.staleDays));
   save();

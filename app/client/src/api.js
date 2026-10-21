@@ -20,4 +20,5 @@ export const api = {
   scan: () => request("POST", "/api/scan"),
   scanStatus: () => request("GET", "/api/scan/status"),
   scans: () => request("GET", "/api/scans"),
+  acceptBudgetRefs: (body) => request("POST", "/api/budget-refs/accept", body),
 };

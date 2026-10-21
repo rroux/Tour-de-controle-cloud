@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { Block, Pill } from "../components/ui.jsx";
-import { dateTimeFr, fr } from "../format.js";
+import { dateFr, dateTimeFr, fr, keur } from "../format.js";
 
 const EMPTY_SOURCE = { name: "", path: "", auth: "session", domain: "", username: "", password: "", recursive: true, enabled: true };
 const SCHEDULES = [
@@ -68,6 +68,8 @@ export default function Parametres({ scan, startScan, reload, setToast, projects
           <Schedule cfg={cfg} setCfg={setCfg} setToast={setToast} setError={setError} />
           <Objective cfg={cfg} setCfg={setCfg} reload={reload} setToast={setToast} setError={setError} />
         </div>
+
+        <BudgetRef cfg={cfg} setCfg={setCfg} projects={projects} reload={reload} setToast={setToast} setError={setError} />
 
         <History history={history} />
       </div>
@@ -418,6 +420,100 @@ function Objective({ cfg, setCfg, reload, setToast, setError }) {
       </fieldset>
       <div><button className="btn pri" type="submit" disabled={!dirty}>Enregistrer les objectifs</button></div>
     </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 5. Budget de référence : figé dans l'application, mis à jour sur décision
+// ---------------------------------------------------------------------------
+
+function BudgetRef({ cfg, setCfg, projects, reload, setToast, setError }) {
+  const [year, setYear] = useState(String(cfg.budgetRefYear));
+  const y = Number(year);
+  const valid = Number.isInteger(y) && y >= 2000 && y <= 2100;
+  const sum = (o) => Object.values(o || {}).reduce((a, v) => a + (v || 0), 0);
+  const refs = projects
+    .flatMap((p) => Object.entries(p.budgetRef || {}).map(([yr, r]) => ({ p, yr: Number(yr), r })))
+    .sort((a, b) => Boolean(b.r.pending) - Boolean(a.r.pending) || a.yr - b.yr || a.p.key.localeCompare(b.p.key, "fr"));
+  const pending = refs.filter((x) => x.r.pending);
+
+  const run = async (fn, message) => {
+    try {
+      await fn();
+      await reload();
+      setToast(message);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const saveYear = (e) => {
+    e.preventDefault();
+    run(async () => setCfg({ ...cfg, ...(await api.saveSettings({ budgetRefYear: y })) }), "Exercice du budget de référence enregistré");
+  };
+  const accept = (keys, yr) => run(() => api.acceptBudgetRefs({ keys, year: yr }), "Nouvelle version prise comme budget de référence");
+
+  return (
+    <Block
+      title="Budget de référence"
+      note={pending.length ? `${pending.length} nouvelle${pending.length > 1 ? "s" : ""} version${pending.length > 1 ? "s" : ""} à valider` : "Aucune nouvelle version à valider"}
+    >
+      <div className="card">
+        <form className="row" onSubmit={saveYear} style={{ alignItems: "flex-end", marginBottom: 10 }}>
+          <div className="f" style={{ maxWidth: 220 }}>
+            <label htmlFor="b-year">Budget figé à partir de l'exercice</label>
+            <input className="i" id="b-year" inputMode="numeric" value={year} onChange={(e) => setYear(e.target.value)} aria-invalid={!valid} />
+          </div>
+          <button className="btn" type="submit" disabled={!valid || y === cfg.budgetRefYear}>Enregistrer</button>
+        </form>
+        <p className="hint" style={{ marginTop: 0 }}>
+          Avant {cfg.budgetRefYear}, le budget est la trajectoire initiale de l'onglet Projection. À partir de {cfg.budgetRefYear}, c'est une{" "}
+          <b>photo de l'onglet CEP</b> (CA net, charges) et des jours prévus de l'onglet Activité, prise par l'application la première fois que
+          l'exercice est renseigné. Elle ne change plus ensuite, même si le CEP est modifié : la nouvelle version apparaît ci-dessous et vous décidez
+          de la prendre en compte.
+        </p>
+        {pending.length > 1 && (
+          <div style={{ marginBottom: 10 }}>
+            <button className="btn pri" onClick={() => accept(undefined, undefined)}>Tout prendre en compte ({pending.length})</button>
+          </div>
+        )}
+      </div>
+      <div className="card flush tw" style={{ marginTop: 12 }}>
+        {refs.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Projet</th><th className="n">Exercice</th><th>Figé le</th>
+                <th className="n">CA net référence</th><th className="n">Marge référence</th>
+                <th className="n">CA net CEP actuel</th><th className="n">Marge CEP actuel</th><th />
+              </tr>
+            </thead>
+            <tbody>
+              {refs.map(({ p, yr, r }) => {
+                const ca = sum(r.caNet), mg = ca - sum(r.couts);
+                return (
+                  <tr key={`${p.key}-${yr}`}>
+                    <td><div>{p.client || "—"} · {p.projet || p.fileName}</div><div className="mono">{p.key}</div></td>
+                    <td className="n">{yr}</td>
+                    <td className="mono">{dateFr(r.frozenAt)}</td>
+                    <td className="n">{keur(ca)}</td>
+                    <td className="n">{keur(mg)}{ca ? ` · ${fr((mg / ca) * 100, 1)} %` : ""}</td>
+                    <td className="n">{r.pending ? keur(r.pending.caNet) : <span className="muted">identique</span>}</td>
+                    <td className="n">
+                      {r.pending
+                        ? `${keur(r.pending.caNet - r.pending.couts)}${r.pending.caNet ? ` · ${fr(((r.pending.caNet - r.pending.couts) / r.pending.caNet) * 100, 1)} %` : ""}`
+                        : <span className="muted">—</span>}
+                    </td>
+                    <td>{r.pending && <button className="btn" onClick={() => accept([p.key], yr)}>Prendre en compte</button>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <p className="muted" style={{ padding: 12 }}>Aucun budget de référence figé : aucun CEP n'a encore de chiffres pour {cfg.budgetRefYear} ou après.</p>
+        )}
+      </div>
+    </Block>
   );
 }
 

@@ -63,7 +63,8 @@ Le bouton **Scanner maintenant** lance un scan immédiat. L'**historique des sca
 ### Règles de consolidation
 
 - **Identité d'un projet** : la cellule CODE PROJET du Sommaire (`Sommaire!C6`) si elle est renseignée, sinon le début du nom de fichier avant `_CEP`.
-- **Plusieurs fichiers pour un même projet** (copies, anciennes versions) : le plus récemment modifié est utilisé, et un point d'attention « Doublon » est affiché.
+- **Plusieurs fichiers pour un même projet** (copies, anciennes versions : même code, même nom de projet et même n° d'affaire) : le plus récemment modifié est utilisé, et un point d'attention « Doublon » est affiché.
+- **Deux CEP qui partagent un code** mais pas le nom de projet ou le n° d'affaire restent deux projets, affichés « code · projet ».
 - **Réalisé ou prévisionnel** : un mois est réalisé s'il est antérieur ou égal au **mois de référence** du CEP (`Sommaire!C21`), prévisionnel au-delà.
 - **Périodes** :
   - **Réalisé** : de janvier de l'exercice jusqu'au mois de référence.
@@ -74,21 +75,31 @@ Le bouton **Scanner maintenant** lance un scan immédiat. L'**historique des sca
 - **Objectif global** : fixé dans les Paramètres, ou moyenne des objectifs des projets pondérée par leur CA net de l'exercice.
   - **Marge critique** : sous la moitié de l'objectif du projet.
   - **À surveiller** : sous l'objectif du projet.
+- **Jours budgétés** : « Conso mois » de la trajectoire initiale ; l'atterrissage de l'année = Pilot réalisé puis prévisionnel de l'onglet Activité.
 - **Reste à faire** : somme des jours prévus dans l'onglet Activité (zone prévisionnel) sur les mois après le mois de référence.
 - **Gain IA** : ligne `ZZZ_GAIN_IA` de l'onglet Activité (profil de l'onglet Équipe) : saisie du réalisé jusqu'au mois de référence (ou du prévisionnel si le réalisé est vide), prévisionnel ensuite. Le signe saisi n'a pas d'importance.
 - **Comparaison de deux années** (Synthèse) : « Comparer à » superpose une autre année sur le CA mensuel et le taux de marge.
 - **Contrôle MAJ** : pour le mois contrôlé (par défaut le mois précédent), un CEP est **à jour** quand tous ces points sont conformes :
   - mois de référence au moins égal au mois contrôlé ;
   - date de MAJ du Sommaire au plus tôt 7 jours avant la fin du mois contrôlé ;
-  - jours Pilot du mois saisis ;
+  - jours Pilot du mois saisis (une valeur négative, régularisation, compte comme saisie) ;
   - CA net ou coûts du mois renseignés ;
   - facturation réelle saisie si une facturation était prévue ;
   - prévisionnel renseigné après le mois tant que le projet n'est pas terminé ;
   - trajectoire initiale enregistrée.
 
   Sinon il est **incomplet**, ou **non mis à jour** si son mois de référence est antérieur au mois contrôlé. Les deux cas apparaissent aussi dans les points d'attention.
-- **Réel contre budget** (Portefeuille DP, en taux de marge ; fiche projet) : le budget est la **trajectoire initiale** de l'onglet Projection (« CA NET mois » et « Coûts mois »). La comparaison se fait sur la même base : CA net, et marge = CA net − coûts. Le réel est le réalisé jusqu'au mois de référence de chaque CEP, puis le prévisionnel du CEP. Un CEP sans trajectoire initiale enregistrée est affiché sans budget.
+- **Budget de référence** (Paramètres → Budget de référence) : avant l'exercice réglé (2027 par défaut), le budget est la trajectoire initiale de l'onglet Projection. À partir de cet exercice, c'est une **photo figée** de l'onglet CEP (CA net, total charges) et des jours prévus de l'onglet Activité, prise par l'application la première fois que l'exercice a des chiffres. Elle est conservée dans `data/budgets.json` et ne change plus, même si le CEP est modifié : la nouvelle version est signalée (Paramètres, fiche projet, points d'attention) et ne remplace la référence que sur un clic « Prendre en compte ».
+- **Réel contre budget** (Portefeuille DP, en taux de marge ; fiche projet) : pour les exercices avant le budget de référence, le budget est la **trajectoire initiale** de l'onglet Projection (« CA NET mois » et « Coûts mois »). La comparaison se fait sur la même base : CA net, et marge = CA net − coûts. Le réel est le réalisé jusqu'au mois de référence de chaque CEP, puis le prévisionnel du CEP. Un CEP sans trajectoire initiale enregistrée est affiché sans budget.
 - **Portefeuille DP** : les projets sont regroupés selon le directeur de projet du Sommaire (`SOM_DP`). La liste des DP, dans le rail de gauche, filtre aussi la Synthèse, les Projets et l'Activité.
+
+- **Analyses** : constats calculés dans l'application (rien n'est envoyé à l'extérieur), en 6 thèmes. Les seuils sont regroupés en tête de `client/src/analyses.js`.
+  - **Marge** : taux en baisse 3 mois de suite ; marge à date ou en fin d'année à plus de 3 pt sous le budget (critique au-delà de 8 pt) ; mois prévisionnels à plus de 5 pt au-dessus des mois réalisés.
+  - **Charge et jours** : consommé à plus de 10 % au-dessus du budget à date, avec projection au rythme actuel ; prévisionnel vide alors que le projet continue ; reste à faire supérieur à 21 j par personne et par mois ; collaborateur à plus de 21 j par mois tous projets confondus.
+  - **Facturation** : facturé à plus de 10 % sous le prévu à date ; plus de 15 % du CA reconnu non facturé ; au moins 2 mois sans facturation saisie.
+  - **PAM** : leviers chiffrés non intégrés au CEP ; leviers dont la date de fin est dépassée.
+  - **Portefeuille** : 3 projets à plus de 60 % du CA, un client à plus de 40 % ; fins de contrat dans les 6 mois ; portefeuille DP à plus de 5 % sous le budget de CA.
+  - **Qualité des CEP** : mois de saisie incomplète dans l'année ; CEP non mis à jour ; coûts sans CA ; CA de prestation sans jours ; TJM à plus de 15 % du TJM vendu ; nouvelle version du CEP à valider pour le budget de référence.
 
 ## Données lues dans chaque CEP
 
@@ -114,6 +125,7 @@ Tout est dans le dossier `data/`, créé au premier lancement :
 |---|---|
 | `config.json` | sources, codes, planification |
 | `projects.json` | données extraites des CEP |
+| `budgets.json` | budgets de référence figés (à partir de l'exercice réglé dans les paramètres) : à conserver |
 | `scans.json` | historique des 50 derniers scans |
 | `secret.key` | clé de chiffrement des mots de passe SMB |
 

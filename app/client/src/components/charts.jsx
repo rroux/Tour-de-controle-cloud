@@ -233,7 +233,7 @@ export function MonthBars({ series, refIndex, fmt, tipFmt, label, year, extraRow
   const W = 640, H = height, L = 56, R = 8, T = 10, B = 26;
   const all = series.flatMap((s) => s.data);
   const minV = Math.min(0, ...all);
-  const { top, out } = ticks(Math.max(1, ...all) * 1.08);
+  const { top, out } = ticks(Math.max(Number.EPSILON, ...all) * 1.08);
   const bottom = minV < 0 ? -niceStep(-minV) * Math.ceil(-minV / niceStep(-minV)) : 0;
   const y = (v) => T + ((H - T - B) * (top - v)) / (top - bottom);
   const bw = (W - L - R) / 12;

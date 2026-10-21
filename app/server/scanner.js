@@ -3,6 +3,7 @@ import { getConfig } from "./config.js";
 import { connect, disconnect, isCandidate, listFiles, matchCode } from "./files.js";
 import { parseCepFile, PARSER_VERSION } from "./cepParser.js";
 import { readJson, writeJson } from "./storage.js";
+import { applyBudgetRefs } from "./budgetRef.js";
 
 const STORE = "projects.json";
 const HISTORY = "scans.json";
@@ -22,14 +23,17 @@ export function scanStatus() {
 }
 
 /**
- * Projets consolidés : un projet par code (CODE PROJET ou préfixe du nom de fichier).
- * Si plusieurs fichiers portent le même code, le plus récemment modifié l'emporte.
+ * Projets consolidés. Deux fichiers sont le même projet s'ils ont le même code (CODE PROJET ou préfixe du
+ * nom de fichier), le même nom de projet et le même n° d'affaire : le plus récemment modifié l'emporte
+ * (copies, anciennes versions). Deux CEP qui partagent un code mais pas le projet ou l'affaire restent
+ * deux projets, distingués par « code · projet ».
  */
 export function getProjects() {
   const cfg = getConfig();
   const enabled = new Set(cfg.sources.filter((s) => s.enabled).map((s) => s.id));
   const byKey = new Map();
   const errors = [];
+  const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
   for (const [file, entry] of Object.entries(store.files)) {
     if (!enabled.has(entry.sourceId)) continue;
     if (entry.error) {
@@ -38,17 +42,33 @@ export function getProjects() {
     }
     const p = entry.project;
     if (!p) continue;
-    const prev = byKey.get(p.key);
+    const group = `${p.key}\u0000${norm(p.projet)}\u0000${norm(p.numAffaire)}`;
+    const prev = byKey.get(group);
     const item = { ...p, file, fileName: path.basename(file), fileMtime: entry.mtime, matchedCode: entry.code, sourceId: entry.sourceId };
     if (!prev || prev.fileMtime < entry.mtime) {
       if (prev) item.duplicates = [...(prev.duplicates || []), prev.file];
       else item.duplicates = [];
-      byKey.set(p.key, item);
+      byKey.set(group, item);
     } else {
       prev.duplicates.push(file);
     }
   }
-  return { projects: [...byKey.values()], errors, lastScan: history[0] || null, staleDays: cfg.staleDays, objective: cfg.objective };
+  // Codes partagés par plusieurs projets : clé rendue unique avec le nom du projet (ou l'affaire, ou le fichier).
+  const projects = [...byKey.values()];
+  const count = new Map();
+  for (const p of projects) count.set(p.key, (count.get(p.key) || 0) + 1);
+  const used = new Set();
+  for (const p of projects.sort((a, b) => a.fileName.localeCompare(b.fileName))) {
+    if (count.get(p.key) > 1) {
+      p.codeProjet = p.codeProjet || p.key;
+      let key = `${p.key} · ${p.projet || p.numAffaire || p.fileName.replace(/\.[^.]+$/, "")}`;
+      for (let n = 2; used.has(key); n++) key = `${p.key} · ${p.projet || p.fileName} (${n})`;
+      p.key = key;
+    }
+    used.add(p.key);
+  }
+  applyBudgetRefs(projects);
+  return { projects, errors, lastScan: history[0] || null, staleDays: cfg.staleDays, objective: cfg.objective, budgetRefYear: cfg.budgetRefYear };
 }
 
 /** Lance un scan de toutes les sources actives. `trigger` = "Planifié" | "Manuel". */

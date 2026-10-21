@@ -12,6 +12,23 @@ export function setObjectiveSettings(o) {
   if (o && o.defaut > 0 && o.defaut < 1) objectiveSettings = { defaut: o.defaut, mode: o.mode === "fixe" ? "fixe" : "auto", global: o.global > 0 && o.global < 1 ? o.global : o.defaut };
 }
 
+// Budget : trajectoire initiale (onglet Projection) avant `budgetRefYear`, référence figée de l'onglet CEP ensuite.
+let budgetRefYear = 2027;
+export function setBudgetRefYear(y) {
+  if (Number.isInteger(y)) budgetRefYear = y;
+}
+export const usesReference = (year) => year >= budgetRefYear;
+export const budgetLabel = (year) => (usesReference(year) ? "budget de référence" : "trajectoire initiale");
+
+/** Budget d'un projet pour une année : { caNet, couts, conso } mois par mois, `source`, et pour la référence `frozenAt` / `pending`. */
+export function budgetOf(p, year) {
+  if (usesReference(year)) {
+    const r = p?.budgetRef?.[year];
+    return r ? { ...r, source: "reference" } : { caNet: {}, couts: {}, conso: {}, source: "reference", missing: true };
+  }
+  return { caNet: p?.budget?.caNet || {}, couts: p?.budget?.couts || {}, conso: p?.budget?.conso || {}, dateEnreg: p?.budget?.dateEnreg, source: "trajectoire" };
+}
+
 // Projets sans DP renseigné dans le Sommaire : regroupés sous ce libellé.
 export const NO_DP = "DP non renseigné";
 export const dpOf = (p) => p.dp || NO_DP;
@@ -56,7 +73,7 @@ export function sumRow(p, key, sel) {
  * sur l'année, ou sur toute la trajectoire si l'année n'y figure pas ; à défaut, l'objectif par défaut.
  */
 export function objectiveInfo(p, year) {
-  const b = p?.budget || {};
+  const b = year != null ? budgetOf(p, year) : p?.budget || {};
   const rate = (months) => {
     let ca = 0, co = 0;
     for (const m of months) {
@@ -66,9 +83,14 @@ export function objectiveInfo(p, year) {
     return ca > 0 ? (ca - co) / ca : null;
   };
   const y = year != null ? rate(yearMonths(year)) : null;
-  if (y != null) return { value: y, source: "trajectoire" };
-  const all = rate(Object.keys(b.caNet || {}));
-  if (all != null) return { value: all, source: "trajectoire" };
+  if (y != null) return { value: y, source: b.source || "trajectoire" };
+  const t = p?.budget || {};
+  let ca = 0, co = 0;
+  for (const m of Object.keys(t.caNet || {})) {
+    ca += t.caNet[m] || 0;
+    co += t.couts?.[m] || 0;
+  }
+  if (ca > 0) return { value: (ca - co) / ca, source: "trajectoire" };
   return { value: objectiveSettings.defaut, source: "defaut" };
 }
 
@@ -162,6 +184,8 @@ export function alerts(projects, errors, period, year, staleDays) {
     else if (c.level === "partial") out.push({ level: "warn", tag: "Mise à jour", text: `${p.key} : mise à jour de ${c.monthLabel} incomplète (${c.failed.map((x) => x.label.toLowerCase()).join(", ")})`, key: p.key });
     const age = (Date.now() - p.fileMtime) / 86400000;
     if (age > staleDays) out.push({ level: "warn", tag: "Fraîcheur", text: `${p.key} : fichier non modifié depuis ${Math.floor(age)} jours`, key: p.key });
+    const bud = budgetOf(p, year);
+    if (bud.pending) out.push({ level: "warn", tag: "Budget", text: `${p.key} : le CEP ${year} a changé depuis le budget de référence du ${bud.frozenAt.slice(0, 10).split("-").reverse().join("/")} (à valider dans les paramètres)`, key: p.key });
     if (p.duplicates?.length)
       out.push({ level: "warn", tag: "Doublon", text: `${p.key} : ${p.duplicates.length + 1} fichiers pour ce code, le plus récent est utilisé`, key: p.key });
   }
@@ -186,13 +210,16 @@ export function sumUpTo(o, upto, year) {
 // « Réel » = réalisé jusqu'au mois de référence du projet, prévisionnel du CEP ensuite.
 // ---------------------------------------------------------------------------
 
-export const hasBudget = (p) => Object.values(p.budget?.caNet || {}).some(Boolean) || Object.values(p.budget?.couts || {}).some(Boolean);
+export const hasBudget = (p, year) => {
+  const b = budgetOf(p, year);
+  return Object.values(b.caNet || {}).some(Boolean) || Object.values(b.couts || {}).some(Boolean);
+};
 
 /** Séries mensuelles d'un projet sur l'année : { ca, marge, budCa, budMarge, real[] } (12 valeurs chacune). */
 export function projectTrack(p, year) {
   const months = yearMonths(year);
   const r = p.cep?.rows || {};
-  const b = p.budget || {};
+  const b = budgetOf(p, year);
   return {
     ca: months.map((m) => r.caNet?.[m] || 0),
     marge: months.map((m) => (r.caNet?.[m] || 0) - (r.totalCharges?.[m] || 0)),
@@ -208,7 +235,7 @@ export function budgetFigures(p, year) {
   const upto = (arr) => arr.reduce((a, v, i) => a + (t.real[i] ? v : 0), 0);
   const all = (arr) => arr.reduce((a, v) => a + v, 0);
   return {
-    hasBudget: hasBudget(p),
+    hasBudget: hasBudget(p, year),
     ca: upto(t.ca), budCa: upto(t.budCa), marge: upto(t.marge), budMarge: upto(t.budMarge),
     caAn: all(t.ca), budCaAn: all(t.budCa), margeAn: all(t.marge), budMargeAn: all(t.budMarge),
   };
@@ -256,6 +283,16 @@ export function joursAnnee(p, year) {
 /** Jours prévus sur l'année (onglet Activité, prévisionnel) : `aDate` jusqu'au mois de référence. */
 export function joursPrevus(p, year, aDate = false) {
   return yearMonths(year).reduce((a, m) => a + (!aDate || isReal(p, m) ? p.activite?.joursPrev?.[m] || 0 : 0), 0);
+}
+
+/** Jours de la trajectoire initiale (onglet Projection, « Conso mois ») sur l'année : `aDate` jusqu'au mois de référence. */
+export function joursBudget(p, year, aDate = false) {
+  return yearMonths(year).reduce((a, m) => a + (!aDate || isReal(p, m) ? budgetOf(p, year).conso?.[m] || 0 : 0), 0);
+}
+
+/** Atterrissage des jours sur l'année : Pilot réalisé jusqu'au mois de référence, prévisionnel de l'onglet Activité ensuite. */
+export function joursAtterrissage(p, year) {
+  return yearMonths(year).reduce((a, m) => a + (isReal(p, m) ? p.activite?.joursPilot?.[m] || 0 : p.activite?.joursPrev?.[m] || 0), 0);
 }
 
 /** Gain IA du mois (profil ZZZ_GAIN_IA) : saisie du réalisé jusqu'au mois de référence (ou du prévisionnel si vide), prévisionnel ensuite. */
@@ -329,19 +366,22 @@ export function updateControl(p, month) {
     {
       id: "pilot",
       label: "Conso Pilot",
-      ok: active ? (p.activite?.joursPilot?.[month] || 0) > 0 : null,
-      detail: active ? `${fn(p.activite?.joursPilot?.[month] || 0, 1)} j consommés en ${lbl(month)} (onglet Activité)` : "Projet hors période",
+      // Valeur négative = régularisation saisie : la consommation du mois est bien renseignée.
+      ok: active ? (p.activite?.joursPilot?.[month] || 0) !== 0 : null,
+      detail: active
+        ? `${fn(p.activite?.joursPilot?.[month] || 0, 1)} j consommés en ${lbl(month)} (onglet Activité)${(p.activite?.joursPilot?.[month] || 0) < 0 ? " · régularisation" : ""}`
+        : "Projet hors période",
     },
     {
       id: "cep",
       label: "Réel du CEP",
-      ok: active ? (r.totalCharges?.[month] || 0) > 0 || (r.caNet?.[month] || 0) > 0 : null,
+      ok: active ? (r.totalCharges?.[month] || 0) !== 0 || (r.caNet?.[month] || 0) !== 0 : null,
       detail: active ? `CA net ${fn(Math.round((r.caNet?.[month] || 0) / 1000))} k€ · coûts ${fn(Math.round((r.totalCharges?.[month] || 0) / 1000))} k€ en ${lbl(month)}` : "Projet hors période",
     },
     {
       id: "fact",
       label: "Facturation réelle",
-      ok: th > 0 ? re > 0 : null,
+      ok: th > 0 ? re !== 0 : null,
       detail: th > 0 ? `Facturé ${fn(Math.round(re / 1000))} k€ pour ${fn(Math.round(th / 1000))} k€ prévus en ${lbl(month)}` : "Aucune facturation prévue ce mois",
     },
     {
@@ -352,9 +392,15 @@ export function updateControl(p, month) {
     },
     {
       id: "traj",
-      label: "Trajectoire initiale",
-      ok: hasBudget(p),
-      detail: hasBudget(p) ? `Trajectoire initiale enregistrée${p.budget?.dateEnreg ? ` le ${p.budget.dateEnreg.split("-").reverse().join("/")}` : ""}` : "Trajectoire initiale non enregistrée (onglet Projection)",
+      label: "Budget",
+      ok: hasBudget(p, Number(month.slice(0, 4))),
+      detail: (() => {
+        const y = Number(month.slice(0, 4));
+        const b = budgetOf(p, y);
+        if (!hasBudget(p, y)) return usesReference(y) ? `Aucun chiffre ${y} dans l'onglet CEP : pas de budget de référence` : "Trajectoire initiale non enregistrée (onglet Projection)";
+        if (b.source === "reference") return `Budget de référence ${y} figé le ${b.frozenAt.slice(0, 10).split("-").reverse().join("/")}${b.pending ? " · nouvelle version du CEP à valider" : ""}`;
+        return `Trajectoire initiale enregistrée${b.dateEnreg ? ` le ${b.dateEnreg.split("-").reverse().join("/")}` : ""}`;
+      })(),
     },
   ];
   const failed = checks.filter((c) => c.ok === false);

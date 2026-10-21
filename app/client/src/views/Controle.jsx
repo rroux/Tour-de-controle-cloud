@@ -15,11 +15,11 @@ const LEVELS = {
 const HELP = [
   ["Mois de référence", "la date de référence du Sommaire est au moins le mois contrôlé"],
   ["Date de MAJ", "la date de mise à jour du Sommaire est récente (au plus tôt 7 jours avant la fin du mois contrôlé)"],
-  ["Conso Pilot", "des jours sont consommés ce mois dans l'onglet Activité (zone Pilot)"],
+  ["Conso Pilot", "la consommation du mois est saisie dans l'onglet Activité (zone Pilot) ; une valeur négative est une régularisation, donc conforme"],
   ["Réel du CEP", "le CA net ou les coûts du mois sont renseignés dans l'onglet CEP"],
   ["Facturation réelle", "la facturation réelle est saisie quand une facturation est prévue ce mois"],
   ["Prévisionnel", "des jours sont prévus après ce mois tant que le projet n'est pas terminé"],
-  ["Trajectoire initiale", "la trajectoire initiale est enregistrée dans l'onglet Projection"],
+  ["Budget", "le budget de l'exercice existe : trajectoire initiale de l'onglet Projection, ou budget de référence figé à partir de l'exercice réglé dans les paramètres"],
 ];
 
 function Mark({ c }) {

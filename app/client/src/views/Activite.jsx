@@ -3,10 +3,16 @@ import Band from "../components/Band.jsx";
 import { Lines, MonthBars, Spark } from "../components/charts.jsx";
 import { Block, Empty } from "../components/ui.jsx";
 import { fr, jours, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { cumulate, gainIa, gainIaAt, joursPrevus, portfolioRef, raf as rafOf, yearMonths } from "../model.js";
+import { budgetLabel, budgetOf, cumulate, gainIa, gainIaAt, joursAnnee, joursAtterrissage, joursBudget, portfolioRef, raf as rafOf, yearMonths } from "../model.js";
+
+// Écart réel − budget en jours et en %, vert si on consomme moins que prévu.
+function GapJ({ real, bud }) {
+  if (!bud) return <span className="muted">—</span>;
+  const d = real - bud;
+  return <span className={d <= 0 ? "delta-up" : "delta-down"}>{signed(d, (v) => fr(Math.round(v)))} <small>({signed(d / bud, (v) => pct(v, 0))})</small></span>;
+}
 
 const HEAT = ["--h0", "--h1", "--h2", "--h3", "--h4", "--h5"];
-const WORKING_DAYS = 20.8;
 
 // Jours Pilot réalisés d'un projet pour un mois (0 après son mois de référence).
 const pilotAt = (p, m) => (!p.moisRef || m <= p.moisRef ? p.activite?.joursPilot?.[m] || 0 : 0);
@@ -19,15 +25,18 @@ export default function Activite({ projects, filters, go }) {
 
   const pilot = months.map((m) => projects.reduce((a, p) => a + pilotAt(p, m), 0));
   const prev = months.map((m) => projects.reduce((a, p) => a + (p.activite?.joursPrev?.[m] || 0), 0));
-  const budget = months.map((m) => projects.reduce((a, p) => a + (p.budget?.conso?.[m] || 0), 0));
+  const budget = months.map((m) => projects.reduce((a, p) => a + (budgetOf(p, year).conso?.[m] || 0), 0));
+  const bl = budgetLabel(year);
+  const Bl = bl[0].toUpperCase() + bl.slice(1);
   const hasBudget = budget.some(Boolean);
   const ytdPilot = pilot.reduce((a, b) => a + b, 0);
-  const ytdPrev = months.reduce((a, m, i) => a + (i <= refIndex ? prev[i] : 0), 0);
+  const budADate = projects.reduce((a, p) => a + joursBudget(p, year, true), 0);
+  const budAn = projects.reduce((a, p) => a + joursBudget(p, year), 0);
+  const atterr = projects.reduce((a, p) => a + joursAtterrissage(p, year), 0);
   const raf = projects.reduce((a, p) => a + rafOf(p), 0);
   const gains = projects.map((p) => ({ p, g: gainIa(p, year) })).filter((x) => x.g.annee || x.g.projet).sort((a, b) => b.g.annee - a.g.annee);
   const gainM = months.map((m) => projects.reduce((a, p) => a + gainIaAt(p, m), 0));
   const gainTot = gains.reduce((a, x) => ({ realise: a.realise + x.g.realise, prevu: a.prevu + x.g.prevu, annee: a.annee + x.g.annee, projet: a.projet + x.g.projet }), { realise: 0, prevu: 0, annee: 0, projet: 0 });
-  const realMonths = Math.max(1, refIndex + 1);
 
   const roles = useMemo(() => {
     const map = new Map();
@@ -67,13 +76,18 @@ export default function Activite({ projects, filters, go }) {
       figures={[
         { k: "Jours consommés Pilot", v: fr(Math.round(ytdPilot)), d: ref ? `janvier → ${monthLabel(ref)}` : "" },
         {
-          k: "Écart au prévisionnel",
-          v: ytdPrev ? `${signed(ytdPilot - ytdPrev, (v) => fr(Math.round(v)))} j` : "—",
-          d: ytdPrev ? `${signed((ytdPilot - ytdPrev) / ytdPrev, (v) => pct(v))} sur la période réalisée` : "aucun prévisionnel saisi",
-          tone: ytdPrev ? (ytdPilot > ytdPrev ? "down" : "up") : "",
+          k: `Écart au ${bl}`,
+          v: budADate ? `${signed(ytdPilot - budADate, (v) => fr(Math.round(v)))} j` : "—",
+          d: budADate ? `${signed((ytdPilot - budADate) / budADate, (v) => pct(v))} · budget à date ${fr(Math.round(budADate))} j` : `${bl} non disponible`,
+          tone: budADate ? (ytdPilot > budADate ? "down" : "up") : "",
+        },
+        {
+          k: `Atterrissage ${year}`,
+          v: `${fr(Math.round(atterr))} j`,
+          d: budAn ? <>budget {fr(Math.round(budAn))} j <GapJ real={atterr} bud={budAn} /></> : "réalisé + prévisionnel de l'onglet Activité",
         },
         { k: "Reste à faire", v: `${fr(Math.round(raf))} j`, d: "prévisionnel de l'onglet Activité après le mois de référence" },
-        { k: "ETP moyen", v: fr(ytdPilot / realMonths / WORKING_DAYS, 1), d: `base ${fr(WORKING_DAYS, 1)} jours ouvrés par mois` },
+
       ]}
     />
   );
@@ -101,7 +115,7 @@ export default function Activite({ projects, filters, go }) {
                 <div className="legend">
                   <span><i style={{ borderColor: "var(--s1)" }} />Consommé Pilot</span>
                   <span><i style={{ borderColor: "var(--s3)" }} />Prévisionnel</span>
-                  {hasBudget && <span><i className="dash" style={{ borderColor: "var(--ink-3)" }} />Trajectoire initiale</span>}
+                  {hasBudget && <span><i className="dash" style={{ borderColor: "var(--ink-3)" }} />{Bl}</span>}
                 </div>
               }
             >
@@ -110,11 +124,11 @@ export default function Activite({ projects, filters, go }) {
                   year={year}
                   refIndex={refIndex}
                   fmt={(v) => jours(v)}
-                  label="Jours cumulés consommés, prévisionnels et trajectoire initiale"
+                  label={`Jours cumulés consommés, prévisionnels et ${bl}`}
                   series={[
                     { name: "Consommé Pilot", data: cumulate(pilot.map((v, i) => (i <= refIndex ? v : null))), color: "var(--s1)", area: true },
                     { name: "Prévisionnel", data: cumulate(prev), color: "var(--s3)" },
-                    ...(hasBudget ? [{ name: "Trajectoire initiale", data: cumulate(budget), color: "var(--ink-3)", dash: true, thin: true }] : []),
+                    ...(hasBudget ? [{ name: Bl, data: cumulate(budget), color: "var(--ink-3)", dash: true, thin: true }] : []),
                   ]}
                 />
               </div>
@@ -141,29 +155,33 @@ export default function Activite({ projects, filters, go }) {
               </div>
             </Block>
 
-            <Block className="c12" title="Activité par projet" note="Cliquer une ligne pour ouvrir le projet">
+            <Block className="c12" title="Activité par projet" note={`Réel Pilot contre ${bl} · atterrissage = réalisé + prévisionnel · survoler le reste à faire pour le détail par mois`}>
               <div className="card flush tw">
                 <table>
                   <thead>
                     <tr>
-                      <th>Projet</th><th className="n">Consommés {year}</th><th className="n">Prévus à date</th><th className="n">Écart prév.</th>
-                      <th className="n">Prévus {year}</th><th className="n">Reste à faire</th><th>Jours / mois {year}</th><th className="n">Gain IA {year}</th>
+                      <th>Projet</th><th className="n">Consommés à date</th><th className="n">Budget à date</th><th className="n">Écart</th>
+                      <th className="n">Atterrissage {year}</th><th className="n">Budget {year}</th><th className="n">Écart</th>
+                      <th className="n">Reste à faire</th><th>Jours / mois {year}</th><th className="n">Gain IA {year}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {projects.map((p) => {
                       const real = months.reduce((a, m) => a + pilotAt(p, m), 0);
-                      const pr = months.reduce((a, m) => a + (!p.moisRef || m <= p.moisRef ? p.activite?.joursPrev?.[m] || 0 : 0), 0);
+                      const bd = joursBudget(p, year, true), ba = joursBudget(p, year), at = joursAtterrissage(p, year);
+                      const rafDetail = Object.entries(p.activite?.joursPrev || {}).filter(([m, v]) => m > (p.moisRef || "") && v).map(([m, v]) => `${monthLabel(m)} : ${fr(v, 1)} j`).join("\n");
                       const series = months.map((m) => (!p.moisRef || m <= p.moisRef ? pilotAt(p, m) : p.activite?.joursPrev?.[m] || 0));
                       const g = gainIa(p, year);
                       return (
                         <tr key={p.key} className="click" tabIndex={0} onClick={() => go("projets", p.key)} onKeyDown={(e) => e.key === "Enter" && go("projets", p.key)}>
                           <td><b>{p.key}</b> <span className="muted">{p.client}</span></td>
                           <td className="n">{fr(Math.round(real))}</td>
-                          <td className="n">{fr(Math.round(pr))}</td>
-                          <td className="n">{pr ? signed((real - pr) / pr, (v) => pct(v)) : "—"}</td>
-                          <td className="n">{fr(Math.round(joursPrevus(p, year)))}</td>
-                          <td className="n">{fr(Math.round(rafOf(p)))}</td>
+                          <td className="n">{bd ? fr(Math.round(bd)) : "—"}</td>
+                          <td className="n"><GapJ real={real} bud={bd} /></td>
+                          <td className="n">{fr(Math.round(at))}</td>
+                          <td className="n">{ba ? fr(Math.round(ba)) : "—"}</td>
+                          <td className="n"><GapJ real={at} bud={ba} /></td>
+                          <td className="n" title={rafDetail ? `Prévisionnel après ${monthLabel(p.moisRef)} :\n${rafDetail}` : undefined}>{fr(Math.round(rafOf(p)))}</td>
                           <td><Spark data={series} refIndex={p.moisRef?.startsWith(`${year}-`) ? Number(p.moisRef.slice(5)) - 1 : 11} label={`Jours par mois ${p.key}`} /></td>
                           <td className="n">{g.annee ? `${fr(g.annee, 1)} j` : "—"}</td>
                         </tr>

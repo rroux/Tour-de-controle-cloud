@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from "react";
+import { api } from "../api.js";
 import { MonthBars } from "../components/charts.jsx";
 import { Block, Empty, Status } from "../components/ui.jsx";
 import { dateFr, dateTimeFr, eur, fr, jours, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { budgetFigures, figures, gainIa, joursAnnee, joursPrevus, objectiveInfo, PERIODS, projectTrack, raf, status, sumObj, yearMonths } from "../model.js";
+import { budgetFigures, budgetLabel, budgetOf, figures, gainIa, joursAnnee, joursPrevus, objectiveInfo, PERIODS, projectTrack, raf, status, sumObj, yearMonths } from "../model.js";
 
 const STATUS_COLOR = { ok: "var(--good)", warn: "var(--warn)", crit: "var(--crit)", none: "var(--none)" };
 
-export default function Projets({ projects, filters, selectedKey, go }) {
+export default function Projets({ projects, filters, selectedKey, go, reload, setToast }) {
   const { year, period, setPeriod } = filters;
   const [q, setQ] = useState("");
   const [tab, setTab] = useState("bons");
@@ -45,6 +46,12 @@ export default function Projets({ projects, filters, selectedKey, go }) {
   const track = projectTrack(p, year);
   const bf = budgetFigures(p, year);
   const obj = objectiveInfo(p, year);
+  const bud = budgetOf(p, year);
+  const acceptRef = async () => {
+    await api.acceptBudgetRefs({ keys: [p.key], year });
+    await reload();
+    setToast(`Nouvelle version prise comme budget de référence ${year}`);
+  };
   const reste = raf(p);
   const gain = gainIa(p, year);
   const consoAn = joursAnnee(p, year);
@@ -94,6 +101,7 @@ export default function Projets({ projects, filters, selectedKey, go }) {
               <div style={{ minWidth: 0 }}>
                 <div className="mono" style={{ overflowWrap: "anywhere" }}>{p.fileName} · modifié le {dateTimeFr(new Date(p.fileMtime).toISOString())}</div>
                 <h1>{p.client || p.key} · {p.projet || "—"}</h1>
+                <div className="sub">{[p.key, p.dp && `DP ${p.dp}`, p.moisRef && `réf. ${monthLabel(p.moisRef)}`].filter(Boolean).join(" · ")}</div>
               </div>
               <div className="row">
                 <select className="i" style={{ width: "auto" }} aria-label="Période" value={period} onChange={(e) => setPeriod(e.target.value)}>
@@ -103,6 +111,15 @@ export default function Projets({ projects, filters, selectedKey, go }) {
               </div>
             </div>
 
+            {bud.pending && (
+              <div className="banner row" style={{ justifyContent: "space-between" }}>
+                <span>
+                  Le CEP {year} a changé depuis le budget de référence du {dateFr(bud.frozenAt)} : CA net {keur(sumObj(bud.caNet))} → {keur(bud.pending.caNet)},
+                  marge {keur(sumObj(bud.caNet) - sumObj(bud.couts))} → {keur(bud.pending.caNet - bud.pending.couts)}. Le budget ne change que si vous le décidez.
+                </span>
+                <button className="btn" onClick={acceptRef}>Prendre cette version comme référence</button>
+              </div>
+            )}
             <div className="facts">
               <div><div className="k">CA brut</div><div className="v">{keur(f.ca)}</div><div className="s">CA net {keur(f.caNet)}</div></div>
               <div>
@@ -110,38 +127,13 @@ export default function Projets({ projects, filters, selectedKey, go }) {
                 <div className="v">{pct(f.tauxNet)}</div>
                 <div className="s">
                   {keur(f.margeNette)} · objectif {pct(obj.value)}{" "}
-                  <span title={obj.source === "trajectoire" ? "Taux de la trajectoire initiale (onglet Projection)" : "Trajectoire initiale non enregistrée : objectif par défaut des paramètres"}>
-                    ({obj.source === "trajectoire" ? "trajectoire initiale" : "par défaut"})
+                  <span title={obj.source === "defaut" ? "Pas de budget pour cet exercice : objectif par défaut des paramètres" : `Taux du ${obj.source === "reference" ? "budget de référence figé" : "trajectoire initiale (onglet Projection)"}`}>
+                    ({obj.source === "defaut" ? "par défaut" : obj.source === "reference" ? "budget de référence" : "trajectoire initiale"})
                   </span>
                 </div>
               </div>
               <div><div className="k">Jours consommés {year}</div><div className="v">{fr(Math.round(consoAn))}</div><div className="s">prévu à date {fr(Math.round(prevuADate))} · RAF {fr(Math.round(reste))} j</div></div>
               <div><div className="k">TJM cumulé</div><div className="v">{eur(Math.round(k.tjm?.cumul || 0))}</div><div className="s">PRJ moyen {eur(Math.round(k.prj?.cumul || 0))}</div></div>
-            </div>
-
-            <div className="card">
-              <dl className="meta">
-                {[
-                  ["Code projet", p.key],
-                  ["Entité", p.entite],
-                  ["Directeur de projet", p.dp],
-                  ["Chef de projet", p.cp],
-                  ["Responsable commercial", p.rc],
-                  ["Typologie", p.typologie],
-                  ["Mode de facturation", p.modeFacturation],
-                  ["N° d'affaire", p.numAffaire],
-                  ["Période", `${dateFr(p.dateDebut)} → ${dateFr(p.dateFin)}`],
-                  ["Mois de référence", monthLabel(p.moisRef)],
-                  ["Jours vendus", fr(k.joursVendus)],
-                  ["Reste à faire", `${fr(Math.round(reste))} j (prévisionnel après ${monthLabel(p.moisRef)})`],
-                  ["Gain IA", gain.projet ? `${fr(gain.annee, 1)} j en ${year} · ${fr(gain.projet, 1)} j sur le projet` : "—"],
-                  ["Objectif de marge", `${pct(obj.value)} · ${obj.source === "trajectoire" ? "trajectoire initiale" : "objectif par défaut"}`],
-                  ["Version du modèle", p.versionModele || p.parametres?.version],
-                ].map(([dt, dd]) => (
-                  <div key={dt}><dt>{dt}</dt><dd>{dd || "—"}</dd></div>
-                ))}
-              </dl>
-              {p.description && <p className="muted" style={{ marginBottom: 0 }}>{p.description}</p>}
             </div>
 
             <div className="g12">
@@ -162,7 +154,7 @@ export default function Projets({ projects, filters, selectedKey, go }) {
               </Block>
               <Block
                 className="c7"
-                title={`Marge mensuelle ${year} : réelle et budgétée`}
+                title={`Taux de marge mensuel ${year} : réel et budgété`}
                 note={
                   <div className="legend">
                     <span><i className="sq" style={{ background: "var(--s1)" }} />Réelle{refIndex < 11 ? " (claire : prévisionnel)" : ""}</span>
@@ -173,32 +165,35 @@ export default function Projets({ projects, filters, selectedKey, go }) {
                 <div className="card">
                   {bf.hasBudget ? (
                     <div className="bud">
-                      <div><span>Marge à date</span><b>{keur(bf.marge)}</b><small>budget {keur(bf.budMarge)} · <Ecart real={bf.marge} bud={bf.budMarge} /></small></div>
-                      <div><span>Atterrissage {year}</span><b>{keur(bf.margeAn)}</b><small>budget {keur(bf.budMargeAn)} · <Ecart real={bf.margeAn} bud={bf.budMargeAn} /></small></div>
+                      <div><span>Taux de marge à date</span><b>{pct(rate(bf.marge, bf.ca))}</b><small>budget {pct(rate(bf.budMarge, bf.budCa))} · <EcartPt real={rate(bf.marge, bf.ca)} bud={rate(bf.budMarge, bf.budCa)} /></small></div>
+                      <div><span>Taux de marge {year}</span><b>{pct(rate(bf.margeAn, bf.caAn))}</b><small>budget {pct(rate(bf.budMargeAn, bf.budCaAn))} · <EcartPt real={rate(bf.margeAn, bf.caAn)} bud={rate(bf.budMargeAn, bf.budCaAn)} /></small></div>
                       <div><span>CA net à date</span><b>{keur(bf.ca)}</b><small>budget {keur(bf.budCa)} · <Ecart real={bf.ca} bud={bf.budCa} /></small></div>
                     </div>
                   ) : (
-                    <p className="banner">Trajectoire initiale non enregistrée dans l'onglet Projection de ce CEP : pas de marge budgétée.</p>
+                    <p className="banner">{bud.source === "reference" ? `Pas encore de chiffres ${year} dans l'onglet CEP : pas de budget de référence.` : "Trajectoire initiale non enregistrée dans l'onglet Projection de ce CEP : pas de marge budgétée."}</p>
                   )}
                   <MonthBars
                     year={year}
                     refIndex={refIndex}
-                    label={`Marge mensuelle réelle et budgétée ${p.key}`}
-                    fmt={(v) => `${fr(v / 1000)} k`}
-                    tipFmt={keur}
+                    label={`Taux de marge mensuel réel et budgété ${p.key}`}
+                    fmt={(v) => pct(v, 0)}
+                    tipFmt={(v) => pct(v)}
                     series={[
-                      { name: "Marge réelle", data: track.marge, color: "var(--s1)" },
-                      ...(bf.hasBudget ? [{ name: "Marge budgétée", data: track.budMarge, color: "var(--s3)", solid: true }] : []),
+                      { name: "Taux réel", data: track.marge.map((m, i) => rate(m, track.ca[i]) ?? 0), color: "var(--s1)" },
+                      ...(bf.hasBudget ? [{ name: "Taux budgété", data: track.budMarge.map((m, i) => rate(m, track.budCa[i]) ?? 0), color: "var(--s3)", solid: true }] : []),
                     ]}
                     extraRows={(i) => [
-                      ...(bf.hasBudget ? [["Écart", signed(track.marge[i] - track.budMarge[i], keur)]] : []),
+                      ["Marge réelle", keur(track.marge[i])],
+                      ...(bf.hasBudget ? [["Marge budgétée", keur(track.budMarge[i])]] : []),
                       ["CA net réel", keur(track.ca[i])],
                       ...(bf.hasBudget ? [["CA net budgété", keur(track.budCa[i])]] : []),
-                      ["Taux réel", pct(track.ca[i] ? track.marge[i] / track.ca[i] : 0)],
                     ]}
                   />
                   <p className="hint" style={{ margin: "6px 0 0" }}>
-                    Marge = CA net − coûts, même base que la trajectoire initiale de l'onglet Projection{p.budget?.dateEnreg ? ` (enregistrée le ${dateFr(p.budget.dateEnreg)})` : ""}.
+                    Marge = CA net − coûts. Budget {year} :{" "}
+                    {bud.source === "reference"
+                      ? `budget de référence figé le ${dateFr(bud.frozenAt)} (photo de l'onglet CEP).`
+                      : `trajectoire initiale de l'onglet Projection${bud.dateEnreg ? ` (enregistrée le ${dateFr(bud.dateEnreg)})` : ""}.`}
                   </p>
                 </div>
               </Block>
@@ -227,6 +222,14 @@ export default function Projets({ projects, filters, selectedKey, go }) {
       </div>
     </main>
   );
+}
+
+const rate = (m, c) => (c ? m / c : null);
+
+function EcartPt({ real, bud }) {
+  if (real == null || bud == null) return "—";
+  const d = (real - bud) * 100;
+  return <span className={d >= 0 ? "delta-up" : "delta-down"}>{signed(d, (v) => fr(v, 1))} pt</span>;
 }
 
 function Ecart({ real, bud }) {

@@ -3,7 +3,7 @@ import Band from "../components/Band.jsx";
 import { MarginLine, MonthBars } from "../components/charts.jsx";
 import { Block, Empty, Pill, Status } from "../components/ui.jsx";
 import { fr, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { alerts as buildAlerts, figures, gainIa, joursAnnee, joursPrevus, monthly, portfolioObjective, portfolioRef, status, totalFigures, yearMonths } from "../model.js";
+import { alerts as buildAlerts, budgetLabel, budgetOf, figures, gainIa, joursAnnee, joursBudget, monthly, portfolioObjective, portfolioRef, status, totalFigures, yearMonths } from "../model.js";
 
 // Position du mois de référence dans une année : 11 si l'année est entièrement réalisée, -1 si elle est à venir.
 const refIndexOf = (ref, year) => (ref && ref.startsWith(`${year}-`) ? Number(ref.slice(5)) - 1 : ref && ref < `${year}-01` ? -1 : 11);
@@ -23,13 +23,14 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
   const obj = portfolioObjective(projects, year);
 
   // Budget = trajectoire initiale de l'onglet Projection (CA net et coûts), comparé sur la même base CA net.
-  const sumBudget = (key) => projects.reduce((a, p) => a + months.reduce((s, m) => s + (p.budget?.[key]?.[m] || 0), 0), 0);
+  const sumBudget = (key) => projects.reduce((a, p) => a + months.reduce((s, m) => s + (budgetOf(p, year)[key]?.[m] || 0), 0), 0);
   const budCaNet = sumBudget("caNet");
   const budTaux = budCaNet ? (budCaNet - sumBudget("couts")) / budCaNet : null;
   const tauxNet = tot.caNet ? (tot.caNet - tot.couts) / tot.caNet : 0;
 
   const joursConso = projects.reduce((a, p) => a + joursAnnee(p, year), 0);
-  const joursPrevADate = projects.reduce((a, p) => a + joursPrevus(p, year, true), 0);
+  const joursBudADate = projects.reduce((a, p) => a + joursBudget(p, year, true), 0);
+  const joursBudAn = projects.reduce((a, p) => a + joursBudget(p, year), 0);
   const gain = projects.reduce((a, p) => {
     const g = gainIa(p, year);
     return { realise: a.realise + g.realise, annee: a.annee + g.annee, n: a.n + (g.annee > 0 ? 1 : 0) };
@@ -47,12 +48,13 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
   );
   const maxCa = Math.max(1, ...rows.map((r) => r.f.ca));
 
-  const caM = monthly(projects, (p) => p.cep.rows.caBrut, year);
   const coM = monthly(projects, (p) => p.cep.rows.totalCharges, year);
   const cnM = monthly(projects, (p) => p.cep.rows.caNet, year);
   // Année de comparaison (même graphique) : CA brut et taux de marge mois par mois.
   const cmpMonths = compare ? yearMonths(compare) : null;
-  const cmpCa = compare ? monthly(projects, (p) => p.cep.rows.caBrut, compare) : null;
+  const cmpCa = compare ? monthly(projects, (p) => p.cep.rows.caNet, compare) : null;
+  const budCaM = monthly(projects, (p) => budgetOf(p, year).caNet, year);
+  const hasBud = Object.values(budCaM).some(Boolean);
   const cmpCo = compare ? monthly(projects, (p) => p.cep.rows.totalCharges, compare) : null;
   const cmpCn = compare ? monthly(projects, (p) => p.cep.rows.caNet, compare) : null;
   const cmpRef = compare ? refIndexOf(ref, compare) : null;
@@ -81,11 +83,11 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
           ),
         },
         {
-          k: `Marge ${year}`,
-          v: keur(tot.caNet - tot.couts),
+          k: `Taux de marge ${year}`,
+          v: pct(tauxNet),
           d: (
             <>
-              {pct(tauxNet)} du CA net
+              {keur(tot.caNet - tot.couts)} sur CA net
               <span className={tauxNet >= obj.value ? "delta-up" : "delta-down"} title={`Objectif global ${obj.mode === "auto" ? "calculé : objectifs des projets pondérés par le CA net" : "fixé dans les paramètres"}`}>
                 {tauxNet >= obj.value ? "▲" : "▼"} {fr(Math.abs(tauxNet - obj.value) * 100, 1)} pt vs objectif {pct(obj.value)}
               </span>
@@ -96,7 +98,13 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
         {
           k: `Jours consommés ${year}`,
           v: fr(Math.round(joursConso)),
-          d: joursPrevADate ? `prévu à date ${fr(Math.round(joursPrevADate))} · ${signed((joursConso - joursPrevADate) / joursPrevADate, (v) => pct(v))}` : "aucun prévisionnel saisi",
+          d: joursBudADate ? (
+            <>
+              {budgetLabel(year)} à date {fr(Math.round(joursBudADate))} j{" "}
+              <span className={joursConso <= joursBudADate ? "delta-up" : "delta-down"}>{signed((joursConso - joursBudADate) / joursBudADate, (v) => pct(v))}</span>
+              <span className="muted"> · {fr(Math.round(joursBudAn))} j sur l'année</span>
+            </>
+          ) : `${budgetLabel(year)} non disponible`,
         },
         {
           k: `Gain IA ${year}`,
@@ -134,11 +142,12 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
 
         <div className="grid2">
           <Block
-            title={compare ? `CA mensuel : ${year} et ${compare}` : "CA mensuel"}
+            title={compare ? `CA net mensuel : ${year} et ${compare}` : "CA net mensuel : réel et budgété"}
             note={
               <div className="legend">
-                <span><i className="sq" style={{ background: "var(--s1)" }} />CA brut{compare ? ` ${year}` : ""}</span>
-                {compare && <span><i className="sq" style={{ background: "var(--s2)" }} />CA brut {compare}</span>}
+                <span><i className="sq" style={{ background: "var(--s1)" }} />Réel{compare ? ` ${year}` : ""}</span>
+                {hasBud && <span><i className="sq" style={{ background: "var(--s3)" }} />Budget {compare ? year : ""}</span>}
+                {compare && <span><i className="sq" style={{ background: "var(--s2)" }} />Réel {compare}</span>}
                 {refIndex >= 0 && refIndex < 11 && <span><i className="dash" style={{ borderColor: "var(--ink-3)" }} />Prévisionnel (après {MONTHS[refIndex]} {ref.slice(0, 4)})</span>}
               </div>
             }
@@ -148,12 +157,13 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
                 year={year}
                 refIndex={refIndex}
                 height={240}
-                label={compare ? `CA brut mensuel ${year} et ${compare}` : `CA brut mensuel ${year}`}
+                label={compare ? `CA net mensuel ${year} et ${compare}` : `CA net mensuel réel et budgété ${year}`}
                 fmt={(v) => `${fr(v / 1e6, 1)} M€`}
                 tipFmt={keur}
                 series={[
-                  { name: compare ? `CA brut ${year}` : "CA brut", data: months.map((m) => caM[m]), color: "var(--s1)" },
-                  ...(compare ? [{ name: `CA brut ${compare}`, data: cmpMonths.map((m) => cmpCa[m]), color: "var(--s2)", refIndex: cmpRef }] : []),
+                  { name: compare ? `Réel ${year}` : "CA net réel", data: months.map((m) => cnM[m]), color: "var(--s1)" },
+                  ...(hasBud ? [{ name: compare ? `Budget ${year}` : "CA net budgété", data: months.map((m) => budCaM[m]), color: "var(--s3)", solid: true }] : []),
+                  ...(compare ? [{ name: `Réel ${compare}`, data: cmpMonths.map((m) => cmpCa[m]), color: "var(--s2)", refIndex: cmpRef }] : []),
                 ]}
                 extraRows={(i) => {
                   const marge = (cn, co) => `${keur(cn - co)} · ${pct(cn ? (cn - co) / cn : 0)}`;
@@ -202,7 +212,7 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
           </Block>
         </div>
 
-        <div className="grid2">
+        <div className="stack">
           <Block title="Projets" note={`Triés par CA ${year} · marge sur CA net comparée à l'objectif du projet`}>
             <div className="card flush tw">
               <table>

@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api.js";
 import { dateTimeFr } from "./format.js";
-import { availableYears, defaultYear, dpOf, figures, NO_DP, setObjectiveSettings, status } from "./model.js";
+import { availableYears, defaultYear, dpOf, figures, NO_DP, setBudgetRefYear, setObjectiveSettings, status } from "./model.js";
 import Synthese from "./views/Synthese.jsx";
 import Portefeuille from "./views/Portefeuille.jsx";
 import Projets from "./views/Projets.jsx";
 import Activite from "./views/Activite.jsx";
 import Controle from "./views/Controle.jsx";
+import Analyses from "./views/Analyses.jsx";
 import Parametres from "./views/Parametres.jsx";
 
 const VIEWS = [
@@ -15,6 +16,7 @@ const VIEWS = [
   { id: "projets", label: "Projets" },
   { id: "activite", label: "Activité" },
   { id: "controle", label: "Contrôle MAJ" },
+  { id: "analyses", label: "Analyses" },
   { id: "parametres", label: "Paramètres" },
 ];
 
@@ -35,6 +37,12 @@ const ICONS = {
   ),
   projets: <path d="M2 3.5h12M2 8h12M2 12.5h12" />,
   activite: <path d="M1.5 13.5h13M3.5 11V7M7 11V3M10.5 11V6M14 11V9" />,
+  analyses: (
+    <>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="M10.4 10.4l4 4M5 7.5l1.5 1.5L9.5 5.5" />
+    </>
+  ),
   controle: (
     <>
       <rect x="2" y="1.5" width="12" height="13" rx="1.5" />
@@ -73,6 +81,7 @@ export default function App() {
     try {
       const d = await api.projects();
       setObjectiveSettings(d.objective);
+      setBudgetRefYear(d.budgetRefYear);
       setData(d);
       setLoadError("");
       setYear((y) => y ?? defaultYear(d.projects));
@@ -217,11 +226,13 @@ export default function App() {
         ) : route.view === "portefeuille" ? (
           <Portefeuille projects={selected} data={data} filters={filters} go={go} />
         ) : route.view === "projets" ? (
-          <Projets projects={selected} allProjects={projects} filters={filters} selectedKey={route.key} go={go} />
+          <Projets projects={selected} allProjects={projects} filters={filters} selectedKey={route.key} go={go} reload={load} setToast={setToast} />
         ) : route.view === "activite" ? (
           <Activite projects={selected} filters={filters} go={go} />
         ) : route.view === "controle" ? (
           <Controle projects={selected} filters={filters} go={go} />
+        ) : route.view === "analyses" ? (
+          <Analyses projects={selected} filters={filters} go={go} setDp={setDp} />
         ) : (
           <Parametres scan={scan} startScan={startScan} reload={load} setToast={setToast} projects={projects} />
         ))}
