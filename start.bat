@@ -43,6 +43,11 @@ if errorlevel 1 goto :err_ecriture
 >>"%LOG%" echo Utilisateur : %USERDOMAIN%\%USERNAME%
 >>"%LOG%" ver
 >>"%LOG%" echo Port : %PORT%
+rem Fichiers extraits d'un ZIP telecharge : Windows les marque "provenant d'Internet" et PowerShell
+rem demande alors une confirmation avant chaque script si l'entreprise impose RemoteSigned.
+rem La marque est retiree des fichiers de l'application (pas des donnees ni de node_modules).
+set "CEP_ROOT=%~dp0"
+powershell -NoProfile -NonInteractive -Command "$r = $env:CEP_ROOT; $files = @(Get-ChildItem -LiteralPath $r -File) + @(Get-ChildItem -LiteralPath (Join-Path $r 'app') -File); foreach ($d in 'client', 'server', 'scripts', 'vendor', 'demo') { $files += @(Get-ChildItem -LiteralPath (Join-Path $r ('app\' + $d)) -Recurse -File -ErrorAction SilentlyContinue) }; $n = 0; foreach ($f in $files) { if (Get-Item -LiteralPath $f.FullName -Stream Zone.Identifier -ErrorAction SilentlyContinue) { Unblock-File -LiteralPath $f.FullName; $n++ } }; 'Fichiers marques Internet debloques : ' + $n" >> "%LOG%" 2>&1
 echo OK
 echo %APP% | find /i "OneDrive" >nul && echo         Attention : dossier synchronise par OneDrive, l'installation sera plus lente.
 
@@ -53,7 +58,7 @@ if defined CEP_UPDATED goto :maj_installee
 rem Le script peut remplacer start.bat : l'appel et la relance doivent tenir dans un meme bloc,
 rem lu en entier par cmd avant d'etre execute.
 (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%APP%scripts\update.ps1" > "%STEP%" 2>&1
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%APP%scripts\update.ps1" > "%STEP%" 2>&1
   if errorlevel 10 if not errorlevel 11 (
     echo nouvelle version installee
     type "%STEP%" >> "%LOG%"

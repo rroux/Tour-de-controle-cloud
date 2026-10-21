@@ -27,6 +27,17 @@ TEAM = [("Lyon", "MLE", "MARTIN, Léa", "Chef de projet"), ("Lyon", "KTR", "KERO
         ("Rennes", "FDA", "DALMAS, Fanny", "Ingénieur run"), ("Lyon", "OCL", "CLEMENT, Omar", "Développeur"),
         ("Lyon", "RBE", "BENALI, Rania", "Testeur")]
 SHAPE = [.78, .84, .95, .92, .8, 1, .97, .62, 1, 1.02, 1, .9]
+# Variantes pour illustrer le contrôle des mises à jour et le gain IA :
+#   ref = mois de référence propre au projet, no_fact = facturation réelle du mois de référence non saisie,
+#   old_maj = date de MAJ ancienne, no_traj = trajectoire initiale non enregistrée, gain = part des jours gagnés grâce à l'IA.
+VARIANTS = {
+    "DEMO-ACME": {"gain": 0.06},
+    "DEMO-BETA": {"gain": 0.04},
+    "DEMO-GAMMA": {"gain": 0.08},
+    "DEMO-DELTA": {"no_fact": True},
+    "DEMO-EPSI": {"old_maj": True, "no_traj": True},
+    "DEMO-ZETA": {"ref": dt.datetime(2026, 8, 1)},
+}
 
 
 def month_cols(ws, row):
@@ -52,13 +63,15 @@ def active(ym, start, end):
 
 def build(template, out_dir, spec, rnd):
     code, client, projet, dp, cp, typo, fact, tjm, prj, base, mg, start, end = spec
+    var = VARIANTS.get(code, {})
+    ref_date = var.get("ref", REF)
     wb = openpyxl.load_workbook(template, data_only=True, keep_vba=True)
     som, cep, act = wb["Sommaire"], wb["CEP"], wb["Activité"]
 
     cols = month_cols(cep, 1)
     months = sorted(cols)
     rep = report_col(cep, 1)
-    ref = (REF.year, REF.month)
+    ref = (ref_date.year, ref_date.month)
 
     rows = {k: {} for k in ["sal", "ach", "loc", "pf", "ste", "sti", "tch", "cap", "rev", "cse", "csi", "cab", "rfa", "can", "mb", "mn"]}
     for ym in months:
@@ -114,6 +127,17 @@ def build(template, out_dir, spec, rnd):
                     day_tot[ym] = day_tot.get(ym, 0) + days
             if arep:
                 act.cell(r0, arep).value = round(report["cap"] / tjm * share, 1) if real_only else 0
+    # Profil ZZZ_GAIN_IA (lignes 4 et 41) compensé par ZZZ_GP_TOTAL (lignes 8 et 45), comme dans le modèle.
+    gain = var.get("gain", 0)
+    for r_gain, r_tot, real_only in ((4, 8, True), (41, 45, False)):
+        act.cell(r_gain, 5).value, act.cell(r_gain, 6).value = "ZZZ_GAIN_IA", "ZZZ_GAIN_IA, "
+        act.cell(r_tot, 5).value, act.cell(r_tot, 6).value = "ZZZ_GP_TOTAL", "ZZZ_GP_TOTAL, "
+        for ym, c in acols.items():
+            g = 0
+            if gain and active(ym, start, end) and ym >= (2026, 3) and (not real_only or ym <= ref):
+                g = round(rows["cap"].get(ym, 0) / tjm * gain, 1)
+            act.cell(r_gain, c).value = g
+            act.cell(r_tot, c).value = -g
     for ym, c in acols.items():
         act.cell(94, c).value = round(day_tot.get(ym, 0) if ym <= ref else rows["cap"].get(ym, 0) / tjm, 1)
 
@@ -136,7 +160,8 @@ def build(template, out_dir, spec, rnd):
     s["C10"], s["C11"], s["C12"], s["C13"], s["C14"] = f"AFF-{rnd.randint(10000, 99999)}", "RCO", dp, cp, typo
     s["H7"], s["H8"], s["H9"] = "Services", fact, "Site OPEN"
     s["C19"], s["H19"] = dt.datetime(start[0], start[1], 1), dt.datetime(end[0], end[1], 28)
-    s["C20"], s["C21"] = dt.datetime(2026, 10, 1 + rnd.randint(0, 14), 9, 30), REF
+    maj = dt.datetime(2026, 8, 20, 9, 30) if var.get("old_maj") else dt.datetime(2026, 10, 1 + rnd.randint(0, 14), 9, 30)
+    s["C20"], s["C21"] = maj, ref_date
     s["C23"] = f"{projet} pour {client.replace(' (exemple)', '')} — données fictives de démonstration."
     s["F28"], s["G28"], s["H28"] = tjm * 1.01, tjm, tjm * 0.99
     s["F29"], s["G29"], s["H29"] = prj, prj * 1.01, prj * 1.02
@@ -169,14 +194,18 @@ def build(template, out_dir, spec, rnd):
     for ym, c in fcols.items():
         th = rows["cab"].get(ym, 0) * 0.95
         fac.cell(72, c).value = round(th, 2)
-        fac.cell(73, c).value = round(th * (0.9 + rnd.random() * 0.15), 2) if ym <= ref else 0
+        real = ym < ref or (ym == ref and not var.get("no_fact"))
+        fac.cell(73, c).value = round(th * (0.9 + rnd.random() * 0.15), 2) if real else 0
 
     pro = wb["Projection"]
     pcols = month_cols(pro, 7)
+    f_ca, f_co = 0.97 + rnd.random() * 0.05, 0.99 + rnd.random() * 0.05
     for ym, c in pcols.items():
-        pro.cell(10, c).value = round(rows["cap"].get(ym, 0) / tjm, 1)
-        pro.cell(12, c).value = round(rows["can"].get(ym, 0) * 1.03, 2)
-        pro.cell(15, c).value = round(rows["tch"].get(ym, 0) * 0.98, 2)
+        traj = not var.get("no_traj")
+        pro.cell(10, c).value = round(rows["cap"].get(ym, 0) / tjm, 1) if traj else 0
+        pro.cell(12, c).value = round(rows["can"].get(ym, 0) * f_ca, 2) if traj else 0
+        pro.cell(15, c).value = round(rows["tch"].get(ym, 0) * f_co, 2) if traj else 0
+    pro["C3"] = None if var.get("no_traj") else dt.datetime(start[0], start[1], 15)
 
     pam = wb["PAM"]
     pam["E9"], pam["F9"], pam["G9"], pam["I9"], pam["J9"], pam["N9"], pam["O9"] = (

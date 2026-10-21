@@ -360,21 +360,26 @@ function Schedule({ cfg, setCfg, setToast, setError }) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Objectif de taux de marge
+// 4. Objectifs de taux de marge : par projet (trajectoire initiale, sinon défaut) et global
 // ---------------------------------------------------------------------------
 
+const toInput = (v) => String(Math.round(v * 1000) / 10).replace(".", ",");
+const fromInput = (s) => Number(String(s).replace(",", ".")) / 100;
+
 function Objective({ cfg, setCfg, reload, setToast, setError }) {
-  const [form, setForm] = useState({ value: String(Math.round(cfg.objective.value * 1000) / 10).replace(".", ","), useCep: cfg.objective.useCep });
-  const v = Number(form.value.replace(",", ".")) / 100;
-  const valid = v > 0 && v < 1;
-  const dirty = valid && (Math.abs(v - cfg.objective.value) > 1e-9 || form.useCep !== cfg.objective.useCep);
+  const o = cfg.objective;
+  const [form, setForm] = useState({ defaut: toInput(o.defaut), mode: o.mode, global: toInput(o.global) });
+  const d = fromInput(form.defaut), g = fromInput(form.global);
+  const validD = d > 0 && d < 1, validG = form.mode === "auto" || (g > 0 && g < 1);
+  const valid = validD && validG;
+  const dirty = valid && (Math.abs(d - o.defaut) > 1e-9 || form.mode !== o.mode || (form.mode === "fixe" && Math.abs(g - o.global) > 1e-9));
 
   const save = async (e) => {
     e.preventDefault();
     try {
-      setCfg({ ...cfg, ...(await api.saveSettings({ objective: { value: v, useCep: form.useCep } })) });
+      setCfg({ ...cfg, ...(await api.saveSettings({ objective: { defaut: d, mode: form.mode, global: form.mode === "fixe" ? g : o.global } })) });
       await reload();
-      setToast("Objectif de marge enregistré");
+      setToast("Objectifs de marge enregistrés");
     } catch (err) {
       setError(err.message);
     }
@@ -382,18 +387,36 @@ function Objective({ cfg, setCfg, reload, setToast, setError }) {
 
   return (
     <form className="step" onSubmit={save}>
-      <div className="step-h"><b>4</b><h3>Objectif de marge</h3></div>
-      <div className="hint">Utilisé pour la courbe du taux de marge brute, l'état des projets (critique sous la moitié de l'objectif) et les points d'attention.</div>
-      <div className="f" style={{ maxWidth: 220 }}>
-        <label htmlFor="o-val">Objectif de taux de marge brute (%)</label>
-        <input className="i" id="o-val" inputMode="decimal" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} aria-invalid={!valid} />
-        {!valid && <span className="hint" style={{ color: "var(--crit)" }}>Indiquez un pourcentage entre 0 et 100.</span>}
-      </div>
-      <label className="check">
-        <input type="checkbox" checked={form.useCep} onChange={(e) => setForm({ ...form, useCep: e.target.checked })} />
-        Utiliser plutôt la marge minimum saisie dans l'onglet Paramètres de chaque CEP quand elle est renseignée
-      </label>
-      <div><button className="btn pri" type="submit" disabled={!dirty}>Enregistrer l'objectif</button></div>
+      <div className="step-h"><b>4</b><h3>Objectifs de marge</h3></div>
+      <div className="hint">Taux de marge sur CA net (CA net − coûts). Utilisés pour l'état des projets (critique sous la moitié de l'objectif), les courbes de taux de marge et les points d'attention.</div>
+      <fieldset className="auth">
+        <legend>Objectif par projet</legend>
+        <div className="hint" style={{ margin: 0 }}>Taux de la trajectoire initiale de l'onglet Projection de chaque CEP. Pour un CEP sans trajectoire enregistrée :</div>
+        <div className="f" style={{ maxWidth: 220 }}>
+          <label htmlFor="o-def">Objectif par défaut (%)</label>
+          <input className="i" id="o-def" inputMode="decimal" value={form.defaut} onChange={(e) => setForm({ ...form, defaut: e.target.value })} aria-invalid={!validD} />
+          {!validD && <span className="hint" style={{ color: "var(--crit)" }}>Indiquez un pourcentage entre 0 et 100.</span>}
+        </div>
+      </fieldset>
+      <fieldset className="auth">
+        <legend>Objectif global (Synthèse, portefeuilles)</legend>
+        <label className="check">
+          <input type="radio" name="o-mode" checked={form.mode === "auto"} onChange={() => setForm({ ...form, mode: "auto" })} />
+          Automatique : moyenne des objectifs des projets pondérée par leur CA net de l'année
+        </label>
+        <label className="check">
+          <input type="radio" name="o-mode" checked={form.mode === "fixe"} onChange={() => setForm({ ...form, mode: "fixe" })} />
+          Fixé
+        </label>
+        {form.mode === "fixe" && (
+          <div className="f" style={{ maxWidth: 220 }}>
+            <label htmlFor="o-glob">Objectif global (%)</label>
+            <input className="i" id="o-glob" inputMode="decimal" value={form.global} onChange={(e) => setForm({ ...form, global: e.target.value })} aria-invalid={!validG} />
+            {!validG && <span className="hint" style={{ color: "var(--crit)" }}>Indiquez un pourcentage entre 0 et 100.</span>}
+          </div>
+        )}
+      </fieldset>
+      <div><button className="btn pri" type="submit" disabled={!dirty}>Enregistrer les objectifs</button></div>
     </form>
   );
 }

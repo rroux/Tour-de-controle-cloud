@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import * as XLSX from "xlsx";
 
 // Incrémenter quand l'extraction change : tous les fichiers sont alors relus au scan suivant.
-export const PARSER_VERSION = 5;
+export const PARSER_VERSION = 6;
 
 // ---------------------------------------------------------------------------
 // Lecture bas niveau
@@ -281,8 +281,19 @@ function extractActivite(book, months) {
     for (const k of Object.keys(cols)) out[k] = list.reduce((a, p) => a + (p.jours[k] || 0), 0);
     return out;
   };
+  // Profil ZZZ_GAIN_IA (onglet Équipe, repris dans l'onglet Activité) : jours gagnés grâce à l'IA,
+  // saisis dans le réalisé et/ou le prévisionnel. Le signe dépend des saisies : on garde la valeur absolue.
+  const gainRow = (list) => list.find((p) => /^ZZZ_GAIN_IA$/i.test(p.trigramme) || /^ZZZ_GAIN_IA$/i.test(p.nom));
+  const gp = gainRow(pilot), gf = gainRow(prev);
+  const gainIaPilot = {}, gainIaPrev = {};
+  for (const k of Object.keys(cols)) {
+    gainIaPilot[k] = Math.abs(gp?.jours[k] || 0);
+    gainIaPrev[k] = Math.abs(gf?.jours[k] || 0);
+  }
   const instant = book.ref("ACT_Zone_Jours_Instant");
   return {
+    gainIaPilot,
+    gainIaPrev,
     months: Object.keys(cols).sort(),
     joursPilot: sumBy(pilot),
     joursPrev: sumBy(prev),

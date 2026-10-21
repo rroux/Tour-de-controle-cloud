@@ -1,9 +1,9 @@
 import React, { useMemo } from "react";
 import Band from "../components/Band.jsx";
-import { Lines, Spark } from "../components/charts.jsx";
+import { Lines, MonthBars, Spark } from "../components/charts.jsx";
 import { Block, Empty } from "../components/ui.jsx";
 import { fr, jours, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { cumulate, portfolioRef, yearMonths } from "../model.js";
+import { cumulate, gainIa, gainIaAt, joursPrevus, portfolioRef, raf as rafOf, yearMonths } from "../model.js";
 
 const HEAT = ["--h0", "--h1", "--h2", "--h3", "--h4", "--h5"];
 const WORKING_DAYS = 20.8;
@@ -23,7 +23,10 @@ export default function Activite({ projects, filters, go }) {
   const hasBudget = budget.some(Boolean);
   const ytdPilot = pilot.reduce((a, b) => a + b, 0);
   const ytdPrev = months.reduce((a, m, i) => a + (i <= refIndex ? prev[i] : 0), 0);
-  const raf = projects.reduce((a, p) => a + (p.kpi?.raf || 0), 0);
+  const raf = projects.reduce((a, p) => a + rafOf(p), 0);
+  const gains = projects.map((p) => ({ p, g: gainIa(p, year) })).filter((x) => x.g.annee || x.g.projet).sort((a, b) => b.g.annee - a.g.annee);
+  const gainM = months.map((m) => projects.reduce((a, p) => a + gainIaAt(p, m), 0));
+  const gainTot = gains.reduce((a, x) => ({ realise: a.realise + x.g.realise, prevu: a.prevu + x.g.prevu, annee: a.annee + x.g.annee, projet: a.projet + x.g.projet }), { realise: 0, prevu: 0, annee: 0, projet: 0 });
   const realMonths = Math.max(1, refIndex + 1);
 
   const roles = useMemo(() => {
@@ -69,7 +72,7 @@ export default function Activite({ projects, filters, go }) {
           d: ytdPrev ? `${signed((ytdPilot - ytdPrev) / ytdPrev, (v) => pct(v))} sur la période réalisée` : "aucun prévisionnel saisi",
           tone: ytdPrev ? (ytdPilot > ytdPrev ? "down" : "up") : "",
         },
-        { k: "Reste à faire", v: `${fr(Math.round(raf))} j`, d: "selon les CEP" },
+        { k: "Reste à faire", v: `${fr(Math.round(raf))} j`, d: "prévisionnel de l'onglet Activité après le mois de référence" },
         { k: "ETP moyen", v: fr(ytdPilot / realMonths / WORKING_DAYS, 1), d: `base ${fr(WORKING_DAYS, 1)} jours ouvrés par mois` },
       ]}
     />
@@ -143,8 +146,8 @@ export default function Activite({ projects, filters, go }) {
                 <table>
                   <thead>
                     <tr>
-                      <th>Projet</th><th className="n">Vendus</th><th className="n">Objectif</th><th className="n">Consommés</th>
-                      <th className="n">Reste à faire</th><th>Jours / mois {year}</th><th className="n">Écart prév.</th><th className="n">Dérive / obj.</th>
+                      <th>Projet</th><th className="n">Consommés {year}</th><th className="n">Prévus à date</th><th className="n">Écart prév.</th>
+                      <th className="n">Prévus {year}</th><th className="n">Reste à faire</th><th>Jours / mois {year}</th><th className="n">Gain IA {year}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -152,22 +155,72 @@ export default function Activite({ projects, filters, go }) {
                       const real = months.reduce((a, m) => a + pilotAt(p, m), 0);
                       const pr = months.reduce((a, m) => a + (!p.moisRef || m <= p.moisRef ? p.activite?.joursPrev?.[m] || 0 : 0), 0);
                       const series = months.map((m) => (!p.moisRef || m <= p.moisRef ? pilotAt(p, m) : p.activite?.joursPrev?.[m] || 0));
-                      const k = p.kpi || {};
+                      const g = gainIa(p, year);
                       return (
                         <tr key={p.key} className="click" tabIndex={0} onClick={() => go("projets", p.key)} onKeyDown={(e) => e.key === "Enter" && go("projets", p.key)}>
                           <td><b>{p.key}</b> <span className="muted">{p.client}</span></td>
-                          <td className="n">{fr(k.joursVendus)}</td>
-                          <td className="n">{fr(k.joursObjectif)}</td>
-                          <td className="n">{fr(Math.round(k.conso?.cumul || 0))}</td>
-                          <td className="n">{fr(Math.round(k.raf || 0))}</td>
-                          <td><Spark data={series} refIndex={p.moisRef?.startsWith(`${year}-`) ? Number(p.moisRef.slice(5)) - 1 : 11} label={`Jours par mois ${p.key}`} /></td>
+                          <td className="n">{fr(Math.round(real))}</td>
+                          <td className="n">{fr(Math.round(pr))}</td>
                           <td className="n">{pr ? signed((real - pr) / pr, (v) => pct(v)) : "—"}</td>
-                          <td className="n">{signed(k.pctDeriveObjectif || 0, (v) => pct(v))}</td>
+                          <td className="n">{fr(Math.round(joursPrevus(p, year)))}</td>
+                          <td className="n">{fr(Math.round(rafOf(p)))}</td>
+                          <td><Spark data={series} refIndex={p.moisRef?.startsWith(`${year}-`) ? Number(p.moisRef.slice(5)) - 1 : 11} label={`Jours par mois ${p.key}`} /></td>
+                          <td className="n">{g.annee ? `${fr(g.annee, 1)} j` : "—"}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+              </div>
+            </Block>
+
+            <Block className="c5" title={`Gain IA ${year}`} note="Profil ZZZ_GAIN_IA de l'onglet Activité">
+              <div className="card">
+                {gains.length ? (
+                  <>
+                    <div className="bud">
+                      <div><span>Gain {year}</span><b>{fr(gainTot.annee, 1)} j</b><small>dont réalisé {fr(gainTot.realise, 1)} j</small></div>
+                      <div><span>Part des jours consommés</span><b>{ytdPilot ? pct(gainTot.realise / ytdPilot) : "—"}</b><small>réalisé {year}</small></div>
+                      <div><span>Sur la durée des projets</span><b>{fr(gainTot.projet, 1)} j</b><small>{gains.length} projet{gains.length > 1 ? "s" : ""}</small></div>
+                    </div>
+                    <MonthBars
+                      year={year}
+                      refIndex={refIndex}
+                      height={170}
+                      label={`Gain IA mensuel ${year}`}
+                      fmt={(v) => `${fr(v)} j`}
+                      tipFmt={(v) => `${fr(v, 1)} j`}
+                      series={[{ name: "Gain IA", data: gainM, color: "var(--s3)" }]}
+                    />
+                  </>
+                ) : (
+                  <p className="muted">Aucun gain IA saisi dans les CEP (ligne ZZZ_GAIN_IA de l'onglet Activité).</p>
+                )}
+              </div>
+            </Block>
+            <Block className="c7" title="Gain IA par projet" note="Jours gagnés · cliquer pour ouvrir le projet">
+              <div className="card flush tw">
+                {gains.length ? (
+                  <table>
+                    <thead>
+                      <tr><th>Projet</th><th className="n">Réalisé {year}</th><th className="n">Prévu {year}</th><th className="n">Total {year}</th><th className="n">Durée du projet</th></tr>
+                    </thead>
+                    <tbody>
+                      {gains.map(({ p, g }) => (
+                        <tr key={p.key} className="click" tabIndex={0} onClick={() => go("projets", p.key)} onKeyDown={(e) => e.key === "Enter" && go("projets", p.key)}>
+                          <td><b>{p.key}</b> <span className="muted">{p.client}</span></td>
+                          <td className="n">{fr(g.realise, 1)}</td>
+                          <td className="n">{fr(g.prevu, 1)}</td>
+                          <td className="n"><b>{fr(g.annee, 1)} j</b></td>
+                          <td className="n">{fr(g.projet, 1)} j</td>
+                        </tr>
+                      ))}
+                      <tr className="hl"><td>Total</td><td className="n">{fr(gainTot.realise, 1)}</td><td className="n">{fr(gainTot.prevu, 1)}</td><td className="n">{fr(gainTot.annee, 1)} j</td><td className="n">{fr(gainTot.projet, 1)} j</td></tr>
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="muted" style={{ padding: 12 }}>Aucun projet avec un gain IA.</p>
+                )}
               </div>
             </Block>
 

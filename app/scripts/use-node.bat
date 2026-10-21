@@ -76,7 +76,7 @@ rem ---- 4. Telechargement de Node.js portable
 >con echo.
 >con echo   Telechargement de Node.js portable dans le dossier de l'application, 1 a 3 minutes...
 echo Telechargement de Node.js portable, sans droits administrateur.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-node.ps1"
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0install-node.ps1"
 if errorlevel 1 exit /b 1
 
 :portable

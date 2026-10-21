@@ -54,7 +54,9 @@ Onglet **Paramètres** :
    - Le bouton **Tester** indique le nombre de fichiers Excel visibles, le nombre de ceux qui portent un code et le compte Windows utilisé pour la lecture.
 2. **Quels fichiers** : la liste des **codes d'identification**. Un fichier n'est lu que si **son nom contient l'un des codes** (majuscules et minuscules confondues). Seuls les `.xlsm` et `.xlsx` sont pris en compte ; les fichiers temporaires `~$…` sont exclus. Le champ « Tester un nom de fichier » montre si un nom serait retenu.
 3. **Quand** : tous les jours, en jours ouvrés, toutes les heures ou manuellement. Par défaut, seuls les fichiers modifiés depuis le dernier scan sont relus.
-4. **Objectif de marge** : le taux de marge brute visé (25 % par défaut), appliqué à tous les projets. Une case permet d'utiliser plutôt la « Marge minimum » saisie dans chaque CEP quand elle est renseignée.
+4. **Objectifs de marge** (taux de marge sur CA net) :
+   - **par projet** : le taux de la trajectoire initiale du CEP ; l'objectif **par défaut** (25 %) ne sert qu'aux CEP sans trajectoire enregistrée ;
+   - **global**, pour la Synthèse et les portefeuilles : **automatique** (objectifs des projets pondérés par leur CA net de l'année) ou **fixé**.
 
 Le bouton **Scanner maintenant** lance un scan immédiat. L'**historique des scans** détaille les fichiers retenus, ignorés et en erreur.
 
@@ -66,11 +68,26 @@ Le bouton **Scanner maintenant** lance un scan immédiat. L'**historique des sca
 - **Périodes** :
   - **Réalisé** : de janvier de l'exercice jusqu'au mois de référence.
   - **Année complète** : les 12 mois de l'exercice, réalisé et prévisionnel.
-  - **Fin d'affaire** : le « Report avant » plus tous les mois du CEP.
-- **Objectif de marge** : la valeur réglée dans les Paramètres, ou la « Marge minimum » de l'onglet Paramètres du CEP (`PAR_Marge`) si cette option est cochée.
-  - **Marge critique** : sous la moitié de l'objectif.
-  - **À surveiller** : sous l'objectif, ou une dérive de plus de 5 % sur l'objectif de jours.
-- **Réel contre budget** (Portefeuille DP, fiche projet) : le budget est la **trajectoire initiale** de l'onglet Projection (« CA NET mois » et « Coûts mois »). La comparaison se fait sur la même base : CA net, et marge = CA net − coûts. Le réel est le réalisé jusqu'au mois de référence de chaque CEP, puis le prévisionnel du CEP. Un CEP sans trajectoire initiale enregistrée est affiché sans budget.
+  - Pas de vision « fin d'affaire » : les écrans restent sur le mois et l'année.
+- **Taux de marge** : marge sur CA net, (CA net − coûts) / CA net, la base de la trajectoire initiale.
+- **Objectif d'un projet** : taux de marge de la trajectoire initiale sur l'exercice (sur toute la trajectoire si l'exercice n'y figure pas) ; à défaut, l'objectif par défaut des Paramètres.
+- **Objectif global** : fixé dans les Paramètres, ou moyenne des objectifs des projets pondérée par leur CA net de l'exercice.
+  - **Marge critique** : sous la moitié de l'objectif du projet.
+  - **À surveiller** : sous l'objectif du projet.
+- **Reste à faire** : somme des jours prévus dans l'onglet Activité (zone prévisionnel) sur les mois après le mois de référence.
+- **Gain IA** : ligne `ZZZ_GAIN_IA` de l'onglet Activité (profil de l'onglet Équipe) : saisie du réalisé jusqu'au mois de référence (ou du prévisionnel si le réalisé est vide), prévisionnel ensuite. Le signe saisi n'a pas d'importance.
+- **Comparaison de deux années** (Synthèse) : « Comparer à » superpose une autre année sur le CA mensuel et le taux de marge.
+- **Contrôle MAJ** : pour le mois contrôlé (par défaut le mois précédent), un CEP est **à jour** quand tous ces points sont conformes :
+  - mois de référence au moins égal au mois contrôlé ;
+  - date de MAJ du Sommaire au plus tôt 7 jours avant la fin du mois contrôlé ;
+  - jours Pilot du mois saisis ;
+  - CA net ou coûts du mois renseignés ;
+  - facturation réelle saisie si une facturation était prévue ;
+  - prévisionnel renseigné après le mois tant que le projet n'est pas terminé ;
+  - trajectoire initiale enregistrée.
+
+  Sinon il est **incomplet**, ou **non mis à jour** si son mois de référence est antérieur au mois contrôlé. Les deux cas apparaissent aussi dans les points d'attention.
+- **Réel contre budget** (Portefeuille DP, en taux de marge ; fiche projet) : le budget est la **trajectoire initiale** de l'onglet Projection (« CA NET mois » et « Coûts mois »). La comparaison se fait sur la même base : CA net, et marge = CA net − coûts. Le réel est le réalisé jusqu'au mois de référence de chaque CEP, puis le prévisionnel du CEP. Un CEP sans trajectoire initiale enregistrée est affiché sans budget.
 - **Portefeuille DP** : les projets sont regroupés selon le directeur de projet du Sommaire (`SOM_DP`). La liste des DP, dans le rail de gauche, filtre aussi la Synthèse, les Projets et l'Activité.
 
 ## Données lues dans chaque CEP
@@ -79,9 +96,9 @@ L'extraction s'appuie sur les **noms définis** du modèle V11-20. Elle résiste
 
 | Écran | Source dans le CEP |
 |---|---|
-| Fiche projet, indicateurs | `SOM_*` (Sommaire) : client, projet, DP, CP, dates, TJM, PRJ, rentabilités, jours vendus et objectif, RAF, dérive, fin d'affaire |
+| Fiche projet, indicateurs | `SOM_*` (Sommaire) : client, projet, DP, CP, dates, TJM, PRJ, date de MAJ, mois de référence |
 | CA, coûts, marge mensuels | `CEP_Zone_CEP` : salaires, achats, sous-traitance, total charges, CA brut, RFA, CA net, marges |
-| Activité | `ACT_Zone_Equipe_Conso_Pilot` et `ACT_Zone_Equipe_Conso_Prev` : jours par collaborateur et par mois |
+| Activité | `ACT_Zone_Equipe_Conso_Pilot` et `ACT_Zone_Equipe_Conso_Prev` : jours par collaborateur et par mois, reste à faire, ligne `ZZZ_GAIN_IA` (gain IA) |
 | Bons de commande | `BON_Zone_BC_Presta` |
 | Facturation | `FAC_Zone_Theorique_Instant`, `FAC_Zone_Reel_Instant` |
 | Budget (trajectoire initiale) | `BUD_Zone_Trajectoire_Initiale` (onglet Projection) : conso, CA net et coûts par mois ; `BUD_Date_Enreg_Trajectoire_Initiale` |
@@ -153,6 +170,7 @@ En cas de problème, transmettez `start.log` et `diagnostic.txt`. L'adresse du p
 |---|---|
 | `Dossier inaccessible … EACCES` ou `EPERM` | Le compte n'a pas le droit de lecture sur le dossier. |
 | `Dossier inaccessible … ENOENT` | Chemin incorrect, ou partage non joignable (VPN ?). |
+| « Avertissement de sécurité… Voulez-vous exécuter …\update.ps1 ? » | Fichiers extraits d'un ZIP téléchargé, marqués « provenant d'Internet », et stratégie PowerShell imposée par l'entreprise. Répondez **O** une fois : à partir de cette version, `start.bat` retire cette marque des fichiers de l'application au démarrage. Vous pouvez aussi, avant d'extraire le ZIP, ouvrir ses Propriétés et cocher **Débloquer**. |
 | Erreur 1219 lors de la connexion | Une connexion existe déjà vers ce serveur avec d'autres identifiants. L'application tente quand même la lecture. Sinon, laissez le compte vide pour utiliser la session Windows, ou fermez la connexion existante avec `net use \\serveur\partage /delete`. |
 | « structure d'un CEP introuvable » | Le fichier porte un code mais n'est pas un CEP. Rendez le code plus précis. |
 | Port 3000 déjà utilisé | `set PORT=3010` puis `start.bat`. |

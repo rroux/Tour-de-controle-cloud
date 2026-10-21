@@ -3,9 +3,18 @@ import Band from "../components/Band.jsx";
 import { Lines } from "../components/charts.jsx";
 import { Block, Empty, Pill, Status } from "../components/ui.jsx";
 import { fr, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { alerts as buildAlerts, budgetFigures, cumulate, figures, portfolioRef, portfolioTrack, status, totalBudgetFigures } from "../model.js";
+import { alerts as buildAlerts, budgetFigures, controlMonth, cumulate, figures, portfolioObjective, portfolioRef, portfolioTrack, status, totalBudgetFigures, updateControl } from "../model.js";
 
 const PERIOD = "annee";
+
+const rate = (m, c) => (c ? m / c : null);
+// Écart de taux en points, vert si favorable.
+function Pt({ real, target }) {
+  if (real == null || target == null) return <span className="muted">—</span>;
+  const d = (real - target) * 100;
+  return <span className={d >= 0 ? "delta-up" : "delta-down"}>{signed(d, (v) => fr(v, 1))} pt</span>;
+}
+const CONTROL = { ok: ["ok", "À jour"], partial: ["warn", "Incomplet"], late: ["crit", "Non mis à jour"], off: ["none", "Hors période"] };
 
 // Écart réel − budget : montant signé et pourcentage du budget, vert si favorable.
 function Gap({ real, bud, show = true }) {
@@ -30,15 +39,20 @@ export default function Portefeuille({ projects, data, filters, go }) {
       projects
         .map((p) => {
           const f = figures(p, PERIOD, year);
-          return { p, b: budgetFigures(p, year), s: status(p, f) };
+          const b = budgetFigures(p, year);
+          const taux = rate(b.marge, b.ca);
+          return { p, b, f, s: status(p, f), taux, gap: taux == null ? 0 : taux - f.obj, c: updateControl(p, controlMonth()) };
         })
-        .sort((a, b) => a.b.marge - a.b.budMarge - (b.b.marge - b.b.budMarge)),
+        .sort((a, b) => a.gap - b.gap),
     [projects, year],
   );
   const counts = rows.reduce((a, r) => ({ ...a, [r.s.level]: (a[r.s.level] || 0) + 1 }), {});
   const alertList = buildAlerts(projects, [], PERIOD, year, data.staleDays);
   const taux = tot.ca ? tot.marge / tot.ca : 0;
   const budTaux = tot.budCa ? tot.budMarge / tot.budCa : null;
+  const tauxAn = rate(tot.margeAn, tot.caAn);
+  const budTauxAn = rate(tot.budMargeAn, tot.budCaAn);
+  const obj = portfolioObjective(projects, year);
   const budgetOk = tot.withBudget > 0;
 
   const band = (
@@ -54,23 +68,19 @@ export default function Portefeuille({ projects, data, filters, go }) {
           d: budgetOk ? <>budget à date {keur(tot.budCa)} <Gap real={tot.ca} bud={tot.budCa} /></> : "trajectoire initiale non enregistrée",
         },
         {
-          k: "Marge réalisée",
-          v: keur(tot.marge),
+          k: "Taux de marge à date",
+          v: pct(taux),
           d: (
             <>
-              {pct(taux)} du CA net
-              {budgetOk && budTaux != null && (
-                <span className={taux >= budTaux ? "delta-up" : "delta-down"}>
-                  {taux >= budTaux ? "▲" : "▼"} {fr(Math.abs(taux - budTaux) * 100, 1)} pt vs budget
-                </span>
-              )}
+              objectif {pct(obj.value)}{obj.mode === "auto" ? " (auto)" : ""} <Pt real={taux} target={obj.value} />
+              {budgetOk && budTaux != null && <> · budget {pct(budTaux)} <Pt real={taux} target={budTaux} /></>}
             </>
           ),
         },
         {
-          k: `Atterrissage marge ${year}`,
-          v: keur(tot.margeAn),
-          d: budgetOk ? <>budget {keur(tot.budMargeAn)} <Gap real={tot.margeAn} bud={tot.budMargeAn} /></> : `CA net ${keur(tot.caAn)}`,
+          k: `Taux de marge ${year} (atterrissage)`,
+          v: tauxAn == null ? "—" : pct(tauxAn),
+          d: budgetOk && budTauxAn != null ? <>budget {pct(budTauxAn)} <Pt real={tauxAn} target={budTauxAn} /></> : `objectif ${pct(obj.value)}`,
         },
         {
           k: "État du portefeuille",
@@ -94,7 +104,13 @@ export default function Portefeuille({ projects, data, filters, go }) {
     );
   }
 
-  const chart = (title, real, bud) => (
+  // Taux de marge cumulé depuis janvier : marge cumulée / CA net cumulé.
+  const cumRate = (m, c) => {
+    const cm = cumulate(m), cc = cumulate(c);
+    return cm.map((v, i) => (cc[i] ? v / cc[i] : null));
+  };
+  const pctAxis = (v) => pct(v, 0);
+  const chart = (title, real, bud, opts = {}) => (
     <Block
       title={title}
       note={
@@ -109,13 +125,18 @@ export default function Portefeuille({ projects, data, filters, go }) {
         <Lines
           year={year}
           refIndex={refIndex}
-          fmt={keur}
+          fmt={opts.fmt || keur}
+          axisFmt={opts.axisFmt || opts.fmt || keur}
           label={`${title}, cumul ${year}`}
           series={[
-            { name: "Réel", data: cumulate(real), color: "var(--s1)", area: true, split: true },
-            ...(budgetOk ? [{ name: "Budget", data: cumulate(bud), color: "var(--ink-3)", dash: true, thin: true }] : []),
+            { name: "Réel", data: real, color: "var(--s1)", area: !opts.rate, split: true },
+            ...(budgetOk ? [{ name: "Budget", data: bud, color: "var(--ink-3)", dash: true, thin: true }] : []),
           ]}
-          extraRows={(i) => (budgetOk ? [["Écart", signed(cumulate(real)[i] - cumulate(bud)[i], keur)]] : [])}
+          extraRows={(i) =>
+            budgetOk && real[i] != null && bud[i] != null
+              ? [["Écart", opts.rate ? `${signed((real[i] - bud[i]) * 100, (v) => fr(v, 1))} pt` : signed(real[i] - bud[i], keur)]]
+              : []
+          }
         />
       </div>
     </Block>
@@ -127,11 +148,11 @@ export default function Portefeuille({ projects, data, filters, go }) {
         {band}
 
         <div className="grid2 eq">
-          {chart("Avancement de la marge : réelle et budgétée", track.marge, track.budMarge)}
-          {chart("Avancement du CA net : réel et budgété", track.ca, track.budCa)}
+          {chart("Taux de marge cumulé : réel et budgété", cumRate(track.marge, track.ca), cumRate(track.budMarge, track.budCa), { rate: true, fmt: (v) => pct(v), axisFmt: pctAxis })}
+          {chart("Avancement du CA net : réel et budgété", cumulate(track.ca), cumulate(track.budCa))}
         </div>
 
-        <Block title={`Mois par mois ${year}`} note="Montants mensuels · prévisionnel en italique">
+        <Block title={`Mois par mois ${year}`} note="CA net en k€, taux de marge sur CA net · prévisionnel en italique">
           <div className="card flush tw">
             <table className="months">
               <thead>
@@ -141,8 +162,6 @@ export default function Portefeuille({ projects, data, filters, go }) {
                 {[
                   ["CA net réel", track.ca, ""],
                   ["CA net budget", track.budCa, "sub"],
-                  ["Marge réelle", track.marge, "hl0"],
-                  ["Marge budget", track.budMarge, "sub"],
                 ].map(([l, arr, cls]) => (
                   <tr key={l} className={cls}>
                     <td>{l}</td>
@@ -150,13 +169,25 @@ export default function Portefeuille({ projects, data, filters, go }) {
                     <td className="n"><b>{keur(arr.reduce((a, v) => a + v, 0))}</b></td>
                   </tr>
                 ))}
+                {[
+                  ["Taux de marge réel", track.marge, track.ca, tauxAn, "hl0"],
+                  ["Taux de marge budget", track.budMarge, track.budCa, budTauxAn, "sub"],
+                ].map(([l, m, c, total, cls]) => (
+                  <tr key={l} className={cls}>
+                    <td>{l}</td>
+                    {m.map((v, i) => <td key={i} className={`n${!l.includes("budget") && i > refIndex ? " fc" : ""}`}>{c[i] ? fr((v / c[i]) * 100, 1) : "—"}</td>)}
+                    <td className="n"><b>{total == null ? "—" : pct(total)}</b></td>
+                  </tr>
+                ))}
                 <tr className="hl">
-                  <td>Écart de marge</td>
+                  <td>Écart (pt)</td>
                   {track.marge.map((v, i) => {
-                    const d = v - track.budMarge[i];
-                    return <td key={i} className={`n ${d >= 0 ? "delta-up" : "delta-down"}`}>{budgetOk ? signed(Math.round(d / 1000), fr) : "—"}</td>;
+                    const r = rate(v, track.ca[i]), b = rate(track.budMarge[i], track.budCa[i]);
+                    if (!budgetOk || r == null || b == null) return <td key={i} className="n">—</td>;
+                    const d = (r - b) * 100;
+                    return <td key={i} className={`n ${d >= 0 ? "delta-up" : "delta-down"}`}>{signed(d, (x) => fr(x, 1))}</td>;
                   })}
-                  <td className="n">{budgetOk ? signed(tot.margeAn - tot.budMargeAn, keur) : "—"}</td>
+                  <td className="n">{budgetOk ? <Pt real={tauxAn} target={budTauxAn} /> : "—"}</td>
                 </tr>
               </tbody>
             </table>
@@ -164,7 +195,7 @@ export default function Portefeuille({ projects, data, filters, go }) {
         </Block>
 
         <div className="grid2">
-          <Block title="Projets du portefeuille" note="Réalisé à date contre budget · plus gros retard de marge en tête">
+          <Block title="Projets du portefeuille" note="Réalisé à date · taux de marge sur CA net comparé à l'objectif du projet (trajectoire initiale) · plus gros écart en tête">
             <div className="card flush tw">
               <table>
                 <thead>
@@ -172,14 +203,15 @@ export default function Portefeuille({ projects, data, filters, go }) {
                     <th>Projet</th>
                     <th className="n">CA net</th>
                     <th className="n">vs budget</th>
-                    <th className="n">Marge</th>
-                    <th className="n">vs budget</th>
-                    <th className="n">Taux</th>
+                    <th className="n">Taux de marge</th>
+                    <th className="n">Objectif</th>
+                    <th className="n">Écart</th>
                     <th>État</th>
+                    <th>MAJ {monthLabel(controlMonth())}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(({ p, b, s }) => (
+                  {rows.map(({ p, b, f, s, taux: t, c }) => (
                     <tr key={p.key} className="click" tabIndex={0} onClick={() => go("projets", p.key)} onKeyDown={(e) => e.key === "Enter" && go("projets", p.key)}>
                       <td>
                         <div>{p.client || "—"} · {p.projet || p.fileName}</div>
@@ -187,10 +219,11 @@ export default function Portefeuille({ projects, data, filters, go }) {
                       </td>
                       <td className="n">{keur(b.ca)}</td>
                       <td className="n" title={b.hasBudget ? `Budget à date ${keur(b.budCa)}` : "Trajectoire initiale non enregistrée"}><Gap real={b.ca} bud={b.budCa} show={b.hasBudget} /></td>
-                      <td className="n">{keur(b.marge)}</td>
-                      <td className="n" title={b.hasBudget ? `Budget à date ${keur(b.budMarge)}` : "Trajectoire initiale non enregistrée"}><Gap real={b.marge} bud={b.budMarge} show={b.hasBudget} /></td>
-                      <td className="n">{pct(b.ca ? b.marge / b.ca : 0)}</td>
+                      <td className="n">{t == null ? "—" : pct(t)}</td>
+                      <td className="n" title={b.hasBudget ? "Taux de la trajectoire initiale" : "Objectif par défaut (trajectoire initiale non enregistrée)"}>{pct(f.obj)}{b.hasBudget ? "" : "*"}</td>
+                      <td className="n"><Pt real={t} target={f.obj} /></td>
                       <td><Status s={s} /></td>
+                      <td title={c.failed.map((x) => x.detail).join("\n") || undefined}><Pill level={CONTROL[c.level][0]}>{CONTROL[c.level][1]}</Pill></td>
                     </tr>
                   ))}
                 </tbody>

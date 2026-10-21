@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { MonthBars } from "../components/charts.jsx";
 import { Block, Empty, Status } from "../components/ui.jsx";
 import { dateFr, dateTimeFr, eur, fr, jours, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { budgetFigures, figures, objective, PERIODS, projectTrack, status, sumObj, yearMonths } from "../model.js";
+import { budgetFigures, figures, gainIa, joursAnnee, joursPrevus, objectiveInfo, PERIODS, projectTrack, raf, status, sumObj, yearMonths } from "../model.js";
 
 const STATUS_COLOR = { ok: "var(--good)", warn: "var(--warn)", crit: "var(--crit)", none: "var(--none)" };
 
@@ -44,6 +44,11 @@ export default function Projets({ projects, filters, selectedKey, go }) {
   const refIndex = p.moisRef?.startsWith(`${year}-`) ? Number(p.moisRef.slice(5)) - 1 : p.moisRef && p.moisRef < `${year}-01` ? -1 : 11;
   const track = projectTrack(p, year);
   const bf = budgetFigures(p, year);
+  const obj = objectiveInfo(p, year);
+  const reste = raf(p);
+  const gain = gainIa(p, year);
+  const consoAn = joursAnnee(p, year);
+  const prevuADate = joursPrevus(p, year, true);
   const pl = [
     ["CA brut", f.ca, "hl0"],
     ["Prestation", f.caPresta, "sub"],
@@ -76,7 +81,7 @@ export default function Projets({ projects, filters, selectedKey, go }) {
                   </span>
                   <span className="r">
                     {keur(x.f.ca)}
-                    <div className="m">{pct(x.f.taux)}</div>
+                    <div className="m">{pct(x.f.tauxNet)}</div>
                   </span>
                 </button>
               ))}
@@ -92,16 +97,25 @@ export default function Projets({ projects, filters, selectedKey, go }) {
               </div>
               <div className="row">
                 <select className="i" style={{ width: "auto" }} aria-label="Période" value={period} onChange={(e) => setPeriod(e.target.value)}>
-                  {PERIODS.map((x) => <option key={x.id} value={x.id}>{x.label} {x.id !== "affaire" ? year : ""}</option>)}
+                  {PERIODS.map((x) => <option key={x.id} value={x.id}>{x.label} {year}</option>)}
                 </select>
                 <Status s={s} />
               </div>
             </div>
 
             <div className="facts">
-              <div><div className="k">CA brut</div><div className="v">{keur(f.ca)}</div><div className="s">fin d'affaire {keur(k.caBrutFin)}</div></div>
-              <div><div className="k">Marge brute</div><div className="v">{pct(f.taux)}</div><div className="s">{keur(f.marge)} · objectif {pct(objective(p), 0)}</div></div>
-              <div><div className="k">Jours consommés</div><div className="v">{fr(Math.round(k.conso?.cumul || 0))}</div><div className="s">objectif {fr(k.joursObjectif)} · RAF {fr(Math.round(k.raf || 0))}</div></div>
+              <div><div className="k">CA brut</div><div className="v">{keur(f.ca)}</div><div className="s">CA net {keur(f.caNet)}</div></div>
+              <div>
+                <div className="k">Taux de marge</div>
+                <div className="v">{pct(f.tauxNet)}</div>
+                <div className="s">
+                  {keur(f.margeNette)} · objectif {pct(obj.value)}{" "}
+                  <span title={obj.source === "trajectoire" ? "Taux de la trajectoire initiale (onglet Projection)" : "Trajectoire initiale non enregistrée : objectif par défaut des paramètres"}>
+                    ({obj.source === "trajectoire" ? "trajectoire initiale" : "par défaut"})
+                  </span>
+                </div>
+              </div>
+              <div><div className="k">Jours consommés {year}</div><div className="v">{fr(Math.round(consoAn))}</div><div className="s">prévu à date {fr(Math.round(prevuADate))} · RAF {fr(Math.round(reste))} j</div></div>
               <div><div className="k">TJM cumulé</div><div className="v">{eur(Math.round(k.tjm?.cumul || 0))}</div><div className="s">PRJ moyen {eur(Math.round(k.prj?.cumul || 0))}</div></div>
             </div>
 
@@ -119,10 +133,9 @@ export default function Projets({ projects, filters, selectedKey, go }) {
                   ["Période", `${dateFr(p.dateDebut)} → ${dateFr(p.dateFin)}`],
                   ["Mois de référence", monthLabel(p.moisRef)],
                   ["Jours vendus", fr(k.joursVendus)],
-                  ["Dérive / objectif", `${signed(k.deriveObjectif || 0, (v) => fr(Math.round(v)))} j (${signed(k.pctDeriveObjectif || 0, (v) => pct(v))})`],
-                  ["Renta. fin d'affaire", pct(k.rentaBrut?.fin)],
-                  ["Renta. nette fin d'affaire", pct(k.rentaNet?.fin)],
-                  ["% facturé", pct(k.pctFacturation)],
+                  ["Reste à faire", `${fr(Math.round(reste))} j (prévisionnel après ${monthLabel(p.moisRef)})`],
+                  ["Gain IA", gain.projet ? `${fr(gain.annee, 1)} j en ${year} · ${fr(gain.projet, 1)} j sur le projet` : "—"],
+                  ["Objectif de marge", `${pct(obj.value)} · ${obj.source === "trajectoire" ? "trajectoire initiale" : "objectif par défaut"}`],
                   ["Version du modèle", p.versionModele || p.parametres?.version],
                 ].map(([dt, dd]) => (
                   <div key={dt}><dt>{dt}</dt><dd>{dd || "—"}</dd></div>
@@ -132,7 +145,7 @@ export default function Projets({ projects, filters, selectedKey, go }) {
             </div>
 
             <div className="g12">
-              <Block className="c5" title="Compte d'exploitation" note={PERIODS.find((x) => x.id === period).label + (period !== "affaire" ? ` ${year}` : "")}>
+              <Block className="c5" title="Compte d'exploitation" note={`${PERIODS.find((x) => x.id === period)?.label || ""} ${year}`}>
                 <div className="card flush tw">
                   <table>
                     <tbody>

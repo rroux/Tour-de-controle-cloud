@@ -3,13 +3,13 @@
 export const PERIODS = [
   { id: "realise", label: "Réalisé" },
   { id: "annee", label: "Année complète" },
-  { id: "affaire", label: "Fin d'affaire" },
 ];
 
-// Objectif de taux de marge réglé dans les Paramètres (valeur unique, ou marge minimum de chaque CEP).
-let objectiveSettings = { value: 0.25, useCep: false };
+// Objectifs de taux de marge réglés dans les Paramètres (base CA net) :
+// `defaut` pour un projet sans trajectoire initiale, `mode` auto (pondéré par le CA) ou fixe (`global`).
+let objectiveSettings = { defaut: 0.25, mode: "auto", global: 0.25 };
 export function setObjectiveSettings(o) {
-  if (o && o.value > 0 && o.value < 1) objectiveSettings = { value: o.value, useCep: Boolean(o.useCep) };
+  if (o && o.defaut > 0 && o.defaut < 1) objectiveSettings = { defaut: o.defaut, mode: o.mode === "fixe" ? "fixe" : "auto", global: o.global > 0 && o.global < 1 ? o.global : o.defaut };
 }
 
 // Projets sans DP renseigné dans le Sommaire : regroupés sous ce libellé.
@@ -39,7 +39,6 @@ export function portfolioRef(projects) {
 /** Mois retenus pour un projet selon la période ; `report` indique s'il faut ajouter le « Report avant ». */
 export function periodMonths(p, period, year) {
   const all = p.cep?.months || [];
-  if (period === "affaire") return { months: all, report: true };
   const inYear = all.filter((m) => m.startsWith(`${year}-`));
   if (period === "annee") return { months: inYear, report: false };
   return { months: inYear.filter((m) => !p.moisRef || m <= p.moisRef), report: false };
@@ -52,10 +51,28 @@ export function sumRow(p, key, sel) {
   return s;
 }
 
-export function objective(p) {
-  const o = p?.parametres?.margeMinimum;
-  return objectiveSettings.useCep && o > 0 && o < 1 ? o : objectiveSettings.value;
+/**
+ * Objectif de taux de marge d'un projet : taux de la trajectoire initiale (onglet Projection, CA net − coûts)
+ * sur l'année, ou sur toute la trajectoire si l'année n'y figure pas ; à défaut, l'objectif par défaut.
+ */
+export function objectiveInfo(p, year) {
+  const b = p?.budget || {};
+  const rate = (months) => {
+    let ca = 0, co = 0;
+    for (const m of months) {
+      ca += b.caNet?.[m] || 0;
+      co += b.couts?.[m] || 0;
+    }
+    return ca > 0 ? (ca - co) / ca : null;
+  };
+  const y = year != null ? rate(yearMonths(year)) : null;
+  if (y != null) return { value: y, source: "trajectoire" };
+  const all = rate(Object.keys(b.caNet || {}));
+  if (all != null) return { value: all, source: "trajectoire" };
+  return { value: objectiveSettings.defaut, source: "defaut" };
 }
+
+export const objective = (p, year) => objectiveInfo(p, year).value;
 
 /** Chiffres d'un projet sur la période. */
 export function figures(p, period, year) {
@@ -65,6 +82,7 @@ export function figures(p, period, year) {
   const couts = sumRow(p, "totalCharges", sel);
   const marge = ca - couts;
   return {
+    obj: objective(p, year),
     ca,
     caNet,
     couts,
@@ -94,16 +112,20 @@ export function totalFigures(projects, period, year) {
   return t;
 }
 
-// Objectif du portefeuille : moyenne des objectifs pondérée par le CA.
-export function portfolioObjective(projects, period, year) {
+/**
+ * Objectif global des vues consolidées : fixé dans les Paramètres, ou (auto) moyenne des objectifs
+ * des projets pondérée par leur CA net de l'année.
+ */
+export function portfolioObjective(projects, year) {
+  if (objectiveSettings.mode === "fixe") return { value: objectiveSettings.global, mode: "fixe" };
   let w = 0;
   let s = 0;
   for (const p of projects) {
-    const ca = figures(p, period, year).ca;
+    const ca = Math.max(0, figures(p, "annee", year).caNet);
     w += ca;
-    s += ca * objective(p);
+    s += ca * objective(p, year);
   }
-  return w ? s / w : objective(null);
+  return { value: w ? s / w : objectiveSettings.defaut, mode: "auto" };
 }
 
 /** Série mensuelle consolidée sur l'année : { ym: valeur }. */
@@ -118,30 +140,26 @@ export const cumulate = (values) => {
   return values.map((v) => (v == null ? null : (s += v)));
 };
 
-/** État d'un projet : ok / warn / crit / none, avec le motif. */
+/** État d'un projet : taux de marge (base CA net) comparé à son objectif — ok / warn / crit / none, avec le motif. */
 export function status(p, f) {
-  if (!f.ca) return { level: "none", label: "Sans CA", reason: "Aucun CA sur la période" };
-  const obj = objective(p);
-  if (f.taux < obj / 2) return { level: "crit", label: "Marge critique", reason: `Marge ${(f.taux * 100).toFixed(1)} % pour un objectif de ${(obj * 100).toFixed(0)} %` };
-  const derive = p.kpi?.pctDeriveObjectif || 0;
-  if (f.taux < obj) return { level: "warn", label: "À surveiller", reason: `Marge sous l'objectif de ${(obj * 100).toFixed(0)} %` };
-  if (derive > 0.05) return { level: "warn", label: "À surveiller", reason: `Dérive de ${(derive * 100).toFixed(1)} % sur l'objectif de jours` };
+  if (!f.caNet) return { level: "none", label: "Sans CA", reason: "Aucun CA sur la période" };
+  const obj = f.obj;
+  const t = `Marge ${(f.tauxNet * 100).toFixed(1)} % pour un objectif de ${(obj * 100).toFixed(1)} %`;
+  if (f.tauxNet < obj / 2) return { level: "crit", label: "Marge critique", reason: t };
+  if (f.tauxNet < obj - 0.0005) return { level: "warn", label: "À surveiller", reason: t };
   return { level: "ok", label: "Conforme", reason: "" };
 }
-
-const monthsBetween = (a, b) => (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + Number(b.slice(5, 7)) - Number(a.slice(5, 7));
 
 /** Points d'attention du portefeuille, du plus grave au moins grave. */
 export function alerts(projects, errors, period, year, staleDays) {
   const out = [];
-  const now = new Date();
-  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   for (const p of projects) {
     const f = figures(p, period, year);
     const s = status(p, f);
     if (s.level === "crit" || s.level === "warn") out.push({ level: s.level, tag: s.label, text: `${p.key} : ${s.reason}`, key: p.key });
-    if (p.moisRef && monthsBetween(p.moisRef, thisMonth) > 1)
-      out.push({ level: "warn", tag: "Historisation", text: `${p.key} : mois de référence ${p.moisRef}, CEP non historisé depuis`, key: p.key });
+    const c = updateControl(p, controlMonth());
+    if (c.level === "late") out.push({ level: "crit", tag: "Mise à jour", text: `${p.key} : CEP non mis à jour pour ${c.monthLabel} (mois de référence ${p.moisRef || "absent"})`, key: p.key });
+    else if (c.level === "partial") out.push({ level: "warn", tag: "Mise à jour", text: `${p.key} : mise à jour de ${c.monthLabel} incomplète (${c.failed.map((x) => x.label.toLowerCase()).join(", ")})`, key: p.key });
     const age = (Date.now() - p.fileMtime) / 86400000;
     if (age > staleDays) out.push({ level: "warn", tag: "Fraîcheur", text: `${p.key} : fichier non modifié depuis ${Math.floor(age)} jours`, key: p.key });
     if (p.duplicates?.length)
@@ -215,4 +233,131 @@ export function portfolioTrack(projects, year) {
     for (const k of Object.keys(out)) t[k].forEach((v, i) => (out[k][i] += v));
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Activité : reste à faire et gain IA, lus dans l'onglet Activité.
+// ---------------------------------------------------------------------------
+
+export const isReal = (p, m) => !p.moisRef || m <= p.moisRef;
+
+/** Reste à faire (jours) : somme du prévisionnel de l'onglet Activité sur les mois après le mois de référence. */
+export function raf(p) {
+  const prev = p.activite?.joursPrev || {};
+  const from = p.moisRef || currentMonth();
+  return Object.entries(prev).reduce((a, [m, v]) => a + (m > from ? v || 0 : 0), 0);
+}
+
+/** Jours Pilot consommés sur l'année, jusqu'au mois de référence. */
+export function joursAnnee(p, year) {
+  return yearMonths(year).reduce((a, m) => a + (isReal(p, m) ? p.activite?.joursPilot?.[m] || 0 : 0), 0);
+}
+
+/** Jours prévus sur l'année (onglet Activité, prévisionnel) : `aDate` jusqu'au mois de référence. */
+export function joursPrevus(p, year, aDate = false) {
+  return yearMonths(year).reduce((a, m) => a + (!aDate || isReal(p, m) ? p.activite?.joursPrev?.[m] || 0 : 0), 0);
+}
+
+/** Gain IA du mois (profil ZZZ_GAIN_IA) : saisie du réalisé jusqu'au mois de référence (ou du prévisionnel si vide), prévisionnel ensuite. */
+export function gainIaAt(p, m) {
+  const real = p.activite?.gainIaPilot?.[m] || 0;
+  const prev = p.activite?.gainIaPrev?.[m] || 0;
+  return isReal(p, m) ? real || prev : prev;
+}
+
+/** Gain IA d'un projet : réalisé et prévu sur l'année, total sur toute la durée du CEP. */
+export function gainIa(p, year) {
+  const months = yearMonths(year);
+  const realise = months.reduce((a, m) => a + (isReal(p, m) ? gainIaAt(p, m) : 0), 0);
+  const annee = months.reduce((a, m) => a + gainIaAt(p, m), 0);
+  const all = new Set([...Object.keys(p.activite?.gainIaPilot || {}), ...Object.keys(p.activite?.gainIaPrev || {})]);
+  return { realise, prevu: annee - realise, annee, projet: [...all].reduce((a, m) => a + gainIaAt(p, m), 0) };
+}
+
+// ---------------------------------------------------------------------------
+// Contrôle de la mise à jour mensuelle : la présence du fichier ne suffit pas, on vérifie
+// que le mois contrôlé est bien saisi dans le CEP.
+// ---------------------------------------------------------------------------
+
+export function currentMonth(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Mois à contrôler par défaut : le mois précédent (le CEP du mois M est mis à jour début M+1). */
+export function controlMonth(d = new Date()) {
+  return currentMonth(new Date(d.getFullYear(), d.getMonth() - 1, 1));
+}
+
+export const addMonths = (ym, n) => currentMonth(new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1 + n, 1));
+
+// Date à partir de laquelle la date de MAJ du Sommaire est acceptée : 7 jours avant la fin du mois contrôlé.
+export function controlMajFrom(month) {
+  const d = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1));
+  d.setUTCDate(d.getUTCDate() - 7);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Points de contrôle d'un projet pour le mois `month`. Chaque point : { id, label, ok (true / false / null si sans objet), detail }.
+ * level : ok (tout est saisi), partial (mois de référence à jour mais saisie incomplète), late (mois de référence antérieur), off (projet hors période).
+ */
+export function updateControl(p, month) {
+  const MONTHS_FR = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+  const lbl = (ym) => `${MONTHS_FR[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+  const start = p.dateDebut?.slice(0, 7);
+  const end = p.dateFin?.slice(0, 7);
+  const active = (!start || start <= month) && (!end || end >= month);
+  const r = p.cep?.rows || {};
+  const th = p.facturation?.theorique?.[month] || 0;
+  const re = p.facturation?.reel?.[month] || 0;
+  const majFrom = controlMajFrom(month);
+  const after = Object.entries(p.activite?.joursPrev || {}).reduce((a, [m, v]) => a + (m > month ? v || 0 : 0), 0);
+  const fn = (v, d = 0) => new Intl.NumberFormat("fr-FR", { maximumFractionDigits: d }).format(v);
+  const checks = [
+    {
+      id: "ref",
+      label: "Mois de référence",
+      ok: Boolean(p.moisRef && p.moisRef >= month),
+      detail: p.moisRef ? `Date de référence du Sommaire : ${lbl(p.moisRef)}` : "Date de référence du Sommaire non renseignée",
+    },
+    {
+      id: "maj",
+      label: "Date de MAJ",
+      ok: Boolean(p.dateMaj && p.dateMaj >= majFrom),
+      detail: p.dateMaj ? `Date de MAJ du Sommaire : ${p.dateMaj.split("-").reverse().join("/")} (attendue à partir du ${majFrom.split("-").reverse().join("/")})` : "Date de MAJ du Sommaire non renseignée",
+    },
+    {
+      id: "pilot",
+      label: "Conso Pilot",
+      ok: active ? (p.activite?.joursPilot?.[month] || 0) > 0 : null,
+      detail: active ? `${fn(p.activite?.joursPilot?.[month] || 0, 1)} j consommés en ${lbl(month)} (onglet Activité)` : "Projet hors période",
+    },
+    {
+      id: "cep",
+      label: "Réel du CEP",
+      ok: active ? (r.totalCharges?.[month] || 0) > 0 || (r.caNet?.[month] || 0) > 0 : null,
+      detail: active ? `CA net ${fn(Math.round((r.caNet?.[month] || 0) / 1000))} k€ · coûts ${fn(Math.round((r.totalCharges?.[month] || 0) / 1000))} k€ en ${lbl(month)}` : "Projet hors période",
+    },
+    {
+      id: "fact",
+      label: "Facturation réelle",
+      ok: th > 0 ? re > 0 : null,
+      detail: th > 0 ? `Facturé ${fn(Math.round(re / 1000))} k€ pour ${fn(Math.round(th / 1000))} k€ prévus en ${lbl(month)}` : "Aucune facturation prévue ce mois",
+    },
+    {
+      id: "prev",
+      label: "Prévisionnel",
+      ok: end && end > month ? after > 0 : null,
+      detail: end && end > month ? `${fn(after)} j prévus après ${lbl(month)}, fin du projet ${lbl(end)}` : "Projet terminé à ce mois",
+    },
+    {
+      id: "traj",
+      label: "Trajectoire initiale",
+      ok: hasBudget(p),
+      detail: hasBudget(p) ? `Trajectoire initiale enregistrée${p.budget?.dateEnreg ? ` le ${p.budget.dateEnreg.split("-").reverse().join("/")}` : ""}` : "Trajectoire initiale non enregistrée (onglet Projection)",
+    },
+  ];
+  const failed = checks.filter((c) => c.ok === false);
+  const level = !active ? "off" : !checks[0].ok ? "late" : failed.length ? "partial" : "ok";
+  return { month, monthLabel: lbl(month), checks, failed, level };
 }

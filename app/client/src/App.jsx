@@ -6,6 +6,7 @@ import Synthese from "./views/Synthese.jsx";
 import Portefeuille from "./views/Portefeuille.jsx";
 import Projets from "./views/Projets.jsx";
 import Activite from "./views/Activite.jsx";
+import Controle from "./views/Controle.jsx";
 import Parametres from "./views/Parametres.jsx";
 
 const VIEWS = [
@@ -13,6 +14,7 @@ const VIEWS = [
   { id: "portefeuille", label: "Portefeuille DP" },
   { id: "projets", label: "Projets" },
   { id: "activite", label: "Activité" },
+  { id: "controle", label: "Contrôle MAJ" },
   { id: "parametres", label: "Paramètres" },
 ];
 
@@ -33,6 +35,12 @@ const ICONS = {
   ),
   projets: <path d="M2 3.5h12M2 8h12M2 12.5h12" />,
   activite: <path d="M1.5 13.5h13M3.5 11V7M7 11V3M10.5 11V6M14 11V9" />,
+  controle: (
+    <>
+      <rect x="2" y="1.5" width="12" height="13" rx="1.5" />
+      <path d="M5 8l2 2 4-4.5" />
+    </>
+  ),
   parametres: (
     <>
       <circle cx="8" cy="8" r="2.3" />
@@ -54,6 +62,7 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [scan, setScan] = useState({ running: false });
   const [year, setYear] = useState(null);
+  const [compare, setCompare] = useState(null);
   const [client, setClient] = useState("");
   const [entite, setEntite] = useState("");
   const [dp, setDp] = useState("");
@@ -134,7 +143,7 @@ export default function App() {
     return [...map.values()].sort((a, b) => (a.dp === NO_DP) - (b.dp === NO_DP) || a.dp.localeCompare(b.dp, "fr"));
   }, [projects, curYear]);
 
-  const filters = { year: curYear, setYear, years, client, setClient, clients, entite, setEntite, entites, dp, setDp, dps: dps.map((d) => d.dp), period, setPeriod };
+  const filters = { year: curYear, setYear, years, compare: compare !== curYear && years.includes(compare) ? compare : null, setCompare, client, setClient, clients, entite, setEntite, entites, dp, setDp, dps: dps.map((d) => d.dp), period, setPeriod };
   const last = data?.lastScan;
 
   return (
@@ -211,6 +220,8 @@ export default function App() {
           <Projets projects={selected} allProjects={projects} filters={filters} selectedKey={route.key} go={go} />
         ) : route.view === "activite" ? (
           <Activite projects={selected} filters={filters} go={go} />
+        ) : route.view === "controle" ? (
+          <Controle projects={selected} filters={filters} go={go} />
         ) : (
           <Parametres scan={scan} startScan={startScan} reload={load} setToast={setToast} projects={projects} />
         ))}

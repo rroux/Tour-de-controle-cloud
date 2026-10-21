@@ -11,8 +11,9 @@ const DEFAULTS = {
   schedule: { mode: "daily", time: "06:00" },
   onlyModified: true,
   staleDays: 30,
-  // Objectif de taux de marge : valeur unique, ou marge minimum saisie dans chaque CEP si `useCep`.
-  objective: { value: 0.25, useCep: false },
+  // Objectifs de taux de marge (base CA net). Par projet : taux de la trajectoire initiale du CEP,
+  // `defaut` à défaut. Global (vues consolidées) : `auto` = objectifs des projets pondérés par le CA, sinon `global`.
+  objective: { defaut: 0.25, mode: "auto", global: 0.25 },
 };
 
 // Premier lancement : une source « Exemples » pointe sur le dossier demo/ pour voir l'application remplie.
@@ -40,7 +41,13 @@ if (!config) {
   config = firstRun();
   writeJson(FILE, config);
 }
-config = { ...DEFAULTS, ...config, schedule: { ...DEFAULTS.schedule, ...config.schedule }, objective: { ...DEFAULTS.objective, ...config.objective } };
+config = { ...DEFAULTS, ...config, schedule: { ...DEFAULTS.schedule, ...config.schedule }, objective: migrateObjective(config.objective) };
+
+// Ancien format { value, useCep } : la valeur devient l'objectif par défaut et l'objectif global fixe.
+function migrateObjective(o = {}) {
+  if (o.value != null && o.defaut == null) return { defaut: o.value, mode: "auto", global: o.value };
+  return { ...DEFAULTS.objective, ...o };
+}
 
 export function getConfig() {
   return config;
@@ -73,10 +80,11 @@ export function updateSettings(body) {
     config.schedule = { mode, time };
   }
   if (body.objective) {
-    const v = Number(body.objective.value);
+    const rate = (v, prev) => (Number.isFinite(Number(v)) && Number(v) > 0 && Number(v) < 1 ? Number(v) : prev);
     config.objective = {
-      value: Number.isFinite(v) && v > 0 && v < 1 ? v : config.objective.value,
-      useCep: typeof body.objective.useCep === "boolean" ? body.objective.useCep : config.objective.useCep,
+      defaut: rate(body.objective.defaut, config.objective.defaut),
+      mode: ["auto", "fixe"].includes(body.objective.mode) ? body.objective.mode : config.objective.mode,
+      global: rate(body.objective.global, config.objective.global),
     };
   }
   if (typeof body.onlyModified === "boolean") config.onlyModified = body.onlyModified;

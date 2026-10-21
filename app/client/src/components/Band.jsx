@@ -3,7 +3,7 @@ import { PERIODS } from "../model.js";
 import { Seg } from "./ui.jsx";
 
 /** En-tête de page : titre, filtres globaux à droite, puis une rangée de cartes KPI (les deux premières mises en avant). */
-export default function Band({ eyebrow, title, figures, filters, showPeriod = true }) {
+export default function Band({ eyebrow, title, figures, filters, showPeriod = true, showCompare = false }) {
   return (
     <>
       <header className="top">
@@ -17,6 +17,14 @@ export default function Band({ eyebrow, title, figures, filters, showPeriod = tr
               <option key={y} value={y}>Exercice {y}</option>
             ))}
           </select>
+          {showCompare && (
+            <select aria-label="Comparer avec une autre année" value={filters.compare || ""} onChange={(e) => filters.setCompare(e.target.value ? Number(e.target.value) : null)}>
+              <option value="">Sans comparaison</option>
+              {filters.years.filter((y) => y !== filters.year).map((y) => (
+                <option key={y} value={y}>Comparer à {y}</option>
+              ))}
+            </select>
+          )}
           <select aria-label="Client" value={filters.client} onChange={(e) => filters.setClient(e.target.value)}>
             <option value="">Tous les clients</option>
             {filters.clients.map((c) => (

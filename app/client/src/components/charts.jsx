@@ -68,12 +68,12 @@ const topRounded = (x, y, w, h, r = 3) =>
 // Courbes (cumuls sur 12 mois). `split` : trait plein jusqu'à refIndex, pointillé ensuite.
 // ---------------------------------------------------------------------------
 
-export function Lines({ series, refIndex, fmt, label, year, extraRows }) {
+export function Lines({ series, refIndex, fmt, axisFmt = fmt, label, year, extraRows }) {
   const { host, show, hide, node } = useTip();
   const [hover, setHover] = useState(null);
   const W = 720, H = 260, L = 60, R = 78, T = 12, B = 26;
   const vals = series.flatMap((s) => s.data.filter((v) => v != null));
-  const { top, out: up } = ticks(Math.max(1, ...vals) * 1.05);
+  const { top, out: up } = ticks(Math.max(Number.EPSILON, ...vals) * 1.05);
   // Cumul négatif possible (marge) : graduations prolongées sous zéro avec le même pas.
   const step = up[1] || top;
   const bottom = Math.min(0, Math.floor(Math.min(0, ...vals) / step) * step);
@@ -105,7 +105,7 @@ export function Lines({ series, refIndex, fmt, label, year, extraRows }) {
         {out.map((v) => (
           <g key={v}>
             <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke={v === 0 && bottom < 0 ? "var(--ink-3)" : "var(--rule)"} />
-            <text x={L - 8} y={y(v) + 4} textAnchor="end">{fmt(v)}</text>
+            <text x={L - 8} y={y(v) + 4} textAnchor="end">{axisFmt(v)}</text>
           </g>
         ))}
         {MONTHS.map((m, i) => (i % 2 === 0 || i === 11) && <text key={m} x={x(i)} y={H - 8} textAnchor="middle">{m}</text>)}
@@ -148,11 +148,12 @@ export function Lines({ series, refIndex, fmt, label, year, extraRows }) {
 // ligne d'objectif, valeur du mois de référence mise en avant.
 // ---------------------------------------------------------------------------
 
-export function MarginLine({ rates, amounts, objective, refIndex, year }) {
+export function MarginLine({ rates, amounts, objective, refIndex, year, compare }) {
   const { host, show, hide, node } = useTip();
   const [hover, setHover] = useState(null);
   const W = 400, H = 240, L = 40, R = 12, T = 14, B = 26;
-  const vals = rates.filter((v) => v != null);
+  // `compare` : { year, rates, amounts, refIndex } — taux d'une autre année tracé sur le même graphique.
+  const vals = [...rates, ...(compare?.rates || [])].filter((v) => v != null);
   const lo = Math.min(0, Math.floor(Math.min(0, ...vals) * 10) / 10);
   const hi = Math.max(0.4, Math.ceil(Math.max(objective + 0.05, ...vals) * 10) / 10);
   const x = (i) => L + ((W - L - R) * i) / 11;
@@ -170,7 +171,19 @@ export function MarginLine({ rates, amounts, objective, refIndex, year }) {
     const sx = ((e.clientX - b.left) * W) / b.width;
     const i = Math.max(0, Math.min(11, Math.round((sx - L) / ((W - L - R) / 11))));
     setHover(i);
-    show(e, <TipRows title={`${MONTHS[i]} ${year}${i > ri ? " · prévisionnel" : ""}`} rows={[["Marge", rates[i] == null ? "—" : `${fr(rates[i] * 100, 1)} %`], ["Montant", `${fr(Math.round((amounts[i] || 0) / 1000))} k€`]]} />);
+    const rate = (r) => (r == null ? "—" : `${fr(r * 100, 1)} %`);
+    const keur = (v) => `${fr(Math.round((v || 0) / 1000))} k€`;
+    show(
+      e,
+      <TipRows
+        title={`${MONTHS[i]}${compare ? "" : ` ${year}`}${i > ri ? ` · prévisionnel${compare ? ` ${year}` : ""}` : ""}`}
+        rows={
+          compare
+            ? [[`Marge ${year}`, `${rate(rates[i])} · ${keur(amounts[i])}`], [`Marge ${compare.year}`, `${rate(compare.rates[i])} · ${keur(compare.amounts[i])}`]]
+            : [["Marge", rate(rates[i])], ["Montant", keur(amounts[i])]]
+        }
+      />,
+    );
   };
   return (
     <div className="chart" ref={host}>
@@ -183,6 +196,16 @@ export function MarginLine({ rates, amounts, objective, refIndex, year }) {
         ))}
         <line x1={L} x2={W - R} y1={y(objective)} y2={y(objective)} stroke="var(--ink-3)" strokeDasharray="4 3" />
         <text x={W - R} y={y(objective) - 5} textAnchor="end">objectif</text>
+        {compare && (() => {
+          const cri = Math.max(-1, Math.min(11, compare.refIndex ?? 11));
+          const cp = compare.rates.map((v, i) => (v == null ? null : [x(i), y(v)]));
+          return (
+            <g>
+              <path d={path(cp.slice(0, cri + 1))} fill="none" stroke="var(--s2)" strokeWidth="2" />
+              {cri < 11 && <path d={path(cp.slice(Math.max(0, cri)))} fill="none" stroke="var(--s2)" strokeWidth="2" strokeDasharray="4 3" />}
+            </g>
+          );
+        })()}
         {real.length > 1 && <path d={`${path(real)}L${real[real.length - 1][0]},${y(Math.max(lo, 0))}L${real[0][0]},${y(Math.max(lo, 0))}Z`} fill="var(--s1)" fillOpacity=".1" />}
         {real.length > 0 && <path d={path(real)} fill="none" stroke="var(--s1)" strokeWidth="2" />}
         {fc.length > 1 && <path d={path(fc)} fill="none" stroke="var(--s1)" strokeWidth="2" strokeDasharray="4 3" />}
@@ -233,7 +256,7 @@ export function MonthBars({ series, refIndex, fmt, tipFmt, label, year, extraRow
               {series.map((s, k) => {
                 const v = s.data[i] || 0;
                 const x = x0 + k * (each + gap);
-                const future = fut && !s.solid;
+                const future = (s.refIndex != null ? i > s.refIndex : fut) && !s.solid;
                 const y1 = y(Math.max(0, v)), h = Math.abs(y(v) - y(0));
                 return v >= 0 ? (
                   <path key={s.name} d={topRounded(x, y1, each, h)} fill={s.color} fillOpacity={future ? 0.35 : 1} stroke={future ? s.color : "none"} strokeDasharray={future ? "3 2" : undefined} />

@@ -3,21 +3,24 @@ import Band from "../components/Band.jsx";
 import { MarginLine, MonthBars } from "../components/charts.jsx";
 import { Block, Empty, Pill, Status } from "../components/ui.jsx";
 import { fr, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { alerts as buildAlerts, figures, monthly, portfolioObjective, portfolioRef, status, totalFigures, yearMonths } from "../model.js";
+import { alerts as buildAlerts, figures, gainIa, joursAnnee, joursPrevus, monthly, portfolioObjective, portfolioRef, status, totalFigures, yearMonths } from "../model.js";
+
+// Position du mois de référence dans une année : 11 si l'année est entièrement réalisée, -1 si elle est à venir.
+const refIndexOf = (ref, year) => (ref && ref.startsWith(`${year}-`) ? Number(ref.slice(5)) - 1 : ref && ref < `${year}-01` ? -1 : 11);
 
 // La synthèse porte sur l'exercice complet : réalisé jusqu'au mois de référence, prévisionnel ensuite.
 const PERIOD = "annee";
 
 export default function Synthese({ projects, data, filters, go, startScan }) {
-  const { year } = filters;
+  const { year, compare } = filters;
   const ref = portfolioRef(projects);
   const months = yearMonths(year);
-  const refIndex = ref && ref.startsWith(`${year}-`) ? Number(ref.slice(5)) - 1 : ref && ref < `${year}-01` ? -1 : 11;
+  const refIndex = refIndexOf(ref, year);
 
   const tot = useMemo(() => totalFigures(projects, PERIOD, year), [projects, year]);
   const caRealise = useMemo(() => totalFigures(projects, "realise", year).ca, [projects, year]);
   const caN1 = useMemo(() => totalFigures(projects, PERIOD, year - 1).ca, [projects, year]);
-  const objective = portfolioObjective(projects, PERIOD, year);
+  const obj = portfolioObjective(projects, year);
 
   // Budget = trajectoire initiale de l'onglet Projection (CA net et coûts), comparé sur la même base CA net.
   const sumBudget = (key) => projects.reduce((a, p) => a + months.reduce((s, m) => s + (p.budget?.[key]?.[m] || 0), 0), 0);
@@ -25,26 +28,34 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
   const budTaux = budCaNet ? (budCaNet - sumBudget("couts")) / budCaNet : null;
   const tauxNet = tot.caNet ? (tot.caNet - tot.couts) / tot.caNet : 0;
 
-  const consoCumul = projects.reduce((a, p) => a + (p.kpi?.conso?.cumul || 0), 0);
-  const joursVendus = projects.reduce((a, p) => a + (p.kpi?.joursVendus || 0), 0);
-  const joursObjectif = projects.reduce((a, p) => a + (p.kpi?.joursObjectif || 0), 0);
-  const caNetFin = projects.reduce((a, p) => a + (p.kpi?.caNetFin || 0), 0);
-  const factFin = caNetFin ? projects.reduce((a, p) => a + (p.kpi?.caNetFin || 0) * (p.kpi?.pctFacturation || 0), 0) / caNetFin : 0;
+  const joursConso = projects.reduce((a, p) => a + joursAnnee(p, year), 0);
+  const joursPrevADate = projects.reduce((a, p) => a + joursPrevus(p, year, true), 0);
+  const gain = projects.reduce((a, p) => {
+    const g = gainIa(p, year);
+    return { realise: a.realise + g.realise, annee: a.annee + g.annee, n: a.n + (g.annee > 0 ? 1 : 0) };
+  }, { realise: 0, annee: 0, n: 0 });
 
   const rows = useMemo(
     () =>
       projects
         .map((p) => {
           const f = figures(p, PERIOD, year);
-          return { p, f, s: status(p, f), fin: p.kpi?.caBrutFin || f.ca };
+          return { p, f, s: status(p, f) };
         })
-        .sort((a, b) => b.fin - a.fin),
+        .sort((a, b) => b.f.ca - a.f.ca),
     [projects, year],
   );
   const maxCa = Math.max(1, ...rows.map((r) => r.f.ca));
 
   const caM = monthly(projects, (p) => p.cep.rows.caBrut, year);
   const coM = monthly(projects, (p) => p.cep.rows.totalCharges, year);
+  const cnM = monthly(projects, (p) => p.cep.rows.caNet, year);
+  // Année de comparaison (même graphique) : CA brut et taux de marge mois par mois.
+  const cmpMonths = compare ? yearMonths(compare) : null;
+  const cmpCa = compare ? monthly(projects, (p) => p.cep.rows.caBrut, compare) : null;
+  const cmpCo = compare ? monthly(projects, (p) => p.cep.rows.totalCharges, compare) : null;
+  const cmpCn = compare ? monthly(projects, (p) => p.cep.rows.caNet, compare) : null;
+  const cmpRef = compare ? refIndexOf(ref, compare) : null;
   const alertList = buildAlerts(projects, data.errors, PERIOD, year, data.staleDays);
 
   const band = (
@@ -53,6 +64,7 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
       eyebrow={`Consolidation des CEP V11-20${ref ? ` · mois de référence ${monthLabel(ref)}` : ""}`}
       filters={filters}
       showPeriod={false}
+      showCompare
       figures={[
         {
           k: `CA brut ${year}`,
@@ -69,21 +81,29 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
           ),
         },
         {
-          k: "Marge brute",
-          v: keur(tot.marge),
+          k: `Marge ${year}`,
+          v: keur(tot.caNet - tot.couts),
           d: (
             <>
-              {pct(tot.taux)} du CA
-              {budTaux != null && (
-                <span className={tauxNet >= budTaux ? "delta-up" : "delta-down"} title="Taux de marge sur CA net comparé à la trajectoire initiale">
-                  {tauxNet >= budTaux ? "▲" : "▼"} {fr(Math.abs(tauxNet - budTaux) * 100, 1)} pt vs budget
-                </span>
-              )}
+              {pct(tauxNet)} du CA net
+              <span className={tauxNet >= obj.value ? "delta-up" : "delta-down"} title={`Objectif global ${obj.mode === "auto" ? "calculé : objectifs des projets pondérés par le CA net" : "fixé dans les paramètres"}`}>
+                {tauxNet >= obj.value ? "▲" : "▼"} {fr(Math.abs(tauxNet - obj.value) * 100, 1)} pt vs objectif {pct(obj.value)}
+              </span>
+              {budTaux != null && <span className="muted"> · budget {pct(budTaux)}</span>}
             </>
           ),
         },
-        { k: "Jours consommés", v: fr(Math.round(consoCumul)), d: `sur ${fr(joursVendus)} vendus · objectif ${fr(joursObjectif)}` },
-        { k: "CA NET à fin d'affaire", v: keur(caNetFin), d: `facturé ${pct(factFin)} du total` },
+        {
+          k: `Jours consommés ${year}`,
+          v: fr(Math.round(joursConso)),
+          d: joursPrevADate ? `prévu à date ${fr(Math.round(joursPrevADate))} · ${signed((joursConso - joursPrevADate) / joursPrevADate, (v) => pct(v))}` : "aucun prévisionnel saisi",
+        },
+        {
+          k: `Gain IA ${year}`,
+          v: fr(Math.round(gain.annee)),
+          unit: " j",
+          d: gain.n ? `dont réalisé ${fr(Math.round(gain.realise))} j · ${gain.n} projet${gain.n > 1 ? "s" : ""}` : "aucun gain IA saisi (profil ZZZ_GAIN_IA)",
+        },
       ]}
     />
   );
@@ -114,11 +134,12 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
 
         <div className="grid2">
           <Block
-            title="CA mensuel"
+            title={compare ? `CA mensuel : ${year} et ${compare}` : "CA mensuel"}
             note={
               <div className="legend">
-                <span><i className="sq" style={{ background: "var(--s1)" }} />CA brut</span>
-                {refIndex >= 0 && refIndex < 11 && <span><i className="dash" style={{ borderColor: "var(--ink-3)" }} />Prévisionnel (après {MONTHS[refIndex]})</span>}
+                <span><i className="sq" style={{ background: "var(--s1)" }} />CA brut{compare ? ` ${year}` : ""}</span>
+                {compare && <span><i className="sq" style={{ background: "var(--s2)" }} />CA brut {compare}</span>}
+                {refIndex >= 0 && refIndex < 11 && <span><i className="dash" style={{ borderColor: "var(--ink-3)" }} />Prévisionnel (après {MONTHS[refIndex]} {ref.slice(0, 4)})</span>}
               </div>
             }
           >
@@ -127,34 +148,62 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
                 year={year}
                 refIndex={refIndex}
                 height={240}
-                label={`CA brut mensuel ${year}`}
+                label={compare ? `CA brut mensuel ${year} et ${compare}` : `CA brut mensuel ${year}`}
                 fmt={(v) => `${fr(v / 1e6, 1)} M€`}
                 tipFmt={keur}
                 series={[
-                  { name: "CA brut", data: months.map((m) => caM[m]), color: "var(--s1)" },
+                  { name: compare ? `CA brut ${year}` : "CA brut", data: months.map((m) => caM[m]), color: "var(--s1)" },
+                  ...(compare ? [{ name: `CA brut ${compare}`, data: cmpMonths.map((m) => cmpCa[m]), color: "var(--s2)", refIndex: cmpRef }] : []),
                 ]}
                 extraRows={(i) => {
-                  const c = caM[months[i]], m = c - coM[months[i]];
-                  return [["Marge", `${keur(m)} · ${pct(c ? m / c : 0)}`]];
+                  const marge = (cn, co) => `${keur(cn - co)} · ${pct(cn ? (cn - co) / cn : 0)}`;
+                  if (!compare) return [["Marge", marge(cnM[months[i]], coM[months[i]])]];
+                  return [
+                    [`Marge ${year}`, marge(cnM[months[i]], coM[months[i]])],
+                    [`Marge ${compare}`, marge(cmpCn[cmpMonths[i]], cmpCo[cmpMonths[i]])],
+                  ];
                 }}
               />
             </div>
           </Block>
-          <Block title="Taux de marge brute" note={`Objectif ${fr(objective * 100, 0)} %`}>
+          <Block
+            title="Taux de marge"
+            note={
+              compare ? (
+                <div className="legend">
+                  <span><i style={{ borderColor: "var(--s1)" }} />{year}</span>
+                  <span><i style={{ borderColor: "var(--s2)" }} />{compare}</span>
+                  <span>Objectif {pct(obj.value)}{obj.mode === "auto" ? " (auto)" : ""}</span>
+                </div>
+              ) : (
+                `Base CA net · objectif ${pct(obj.value)}${obj.mode === "auto" ? " (pondéré par le CA)" : ""}`
+              )
+            }
+          >
             <div className="card">
               <MarginLine
                 year={year}
                 refIndex={refIndex}
-                objective={objective}
-                rates={months.map((m) => (caM[m] ? (caM[m] - coM[m]) / caM[m] : null))}
-                amounts={months.map((m) => caM[m] - coM[m])}
+                objective={obj.value}
+                rates={months.map((m) => (cnM[m] ? (cnM[m] - coM[m]) / cnM[m] : null))}
+                amounts={months.map((m) => cnM[m] - coM[m])}
+                compare={
+                  compare
+                    ? {
+                        year: compare,
+                        refIndex: cmpRef,
+                        rates: cmpMonths.map((m) => (cmpCn[m] ? (cmpCn[m] - cmpCo[m]) / cmpCn[m] : null)),
+                        amounts: cmpMonths.map((m) => cmpCn[m] - cmpCo[m]),
+                      }
+                    : null
+                }
               />
             </div>
           </Block>
         </div>
 
         <div className="grid2">
-          <Block title="Projets" note="Triés par CA à fin d'affaire">
+          <Block title="Projets" note={`Triés par CA ${year} · marge sur CA net comparée à l'objectif du projet`}>
             <div className="card flush tw">
               <table>
                 <thead>
@@ -163,7 +212,8 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
                     <th className="n">CA {year}</th>
                     <th />
                     <th className="n">Marge</th>
-                    <th className="n">Dérive / obj.</th>
+                    <th className="n">Objectif</th>
+                    <th className="n">Écart</th>
                     <th>État</th>
                   </tr>
                 </thead>
@@ -178,8 +228,9 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
                       <td>
                         <div className="bar"><span style={{ width: `${(Math.max(0, f.ca) / maxCa) * 100}%` }} /></div>
                       </td>
-                      <td className="n">{pct(f.taux)}</td>
-                      <td className="n">{signed(p.kpi?.pctDeriveObjectif || 0, (v) => pct(v))}</td>
+                      <td className="n">{pct(f.tauxNet)}</td>
+                      <td className="n">{pct(f.obj)}</td>
+                      <td className={`n ${f.tauxNet >= f.obj ? "delta-up" : "delta-down"}`}>{signed((f.tauxNet - f.obj) * 100, (v) => fr(v, 1))} pt</td>
                       <td><Status s={s} /></td>
                     </tr>
                   ))}
