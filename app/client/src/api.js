@@ -21,4 +21,7 @@ export const api = {
   scanStatus: () => request("GET", "/api/scan/status"),
   scans: () => request("GET", "/api/scans"),
   acceptBudgetRefs: (body) => request("POST", "/api/budget-refs/accept", body),
+  acks: () => request("GET", "/api/acks"),
+  ack: (id, level) => request("PUT", `/api/acks/${encodeURIComponent(id)}`, { level }),
+  unack: (id) => request("DELETE", `/api/acks/${encodeURIComponent(id)}`),
 };

@@ -3,7 +3,7 @@ import { api } from "../api.js";
 import { MonthBars } from "../components/charts.jsx";
 import { Block, Empty, Status } from "../components/ui.jsx";
 import { dateFr, dateTimeFr, eur, fr, jours, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { budgetFigures, budgetLabel, budgetOf, figures, gainIa, joursAnnee, joursPrevus, objectiveInfo, PERIODS, projectTrack, raf, status, sumObj, yearMonths } from "../model.js";
+import { bcType, budgetFigures, budgetLabel, budgetOf, figures, gainIa, isReal, joursAnnee, joursPrevus, objectiveInfo, PERIODS, projectTrack, raf, runBuild, status, sumObj, yearMonths } from "../model.js";
 
 const STATUS_COLOR = { ok: "var(--good)", warn: "var(--warn)", crit: "var(--crit)", none: "var(--none)" };
 
@@ -52,10 +52,15 @@ export default function Projets({ projects, filters, selectedKey, go, reload, se
     await reload();
     setToast(`Nouvelle version prise comme budget de référence ${year}`);
   };
-  const reste = raf(p);
+  const reste = raf(p, year);
   const gain = gainIa(p, year);
   const consoAn = joursAnnee(p, year);
   const prevuADate = joursPrevus(p, year, true);
+  const rb = runBuild(p, year);
+  const realMonths = months.filter((m) => isReal(p, m));
+  const factADate = realMonths.reduce((a, m) => a + (p.facturation?.reel?.[m] || 0), 0);
+  const caBrutADate = realMonths.reduce((a, m) => a + (p.cep?.rows?.caBrut?.[m] || 0), 0);
+  const plSplit = 6; // produits | charges et marges
   const pl = [
     ["CA brut", f.ca, "hl0"],
     ["Prestation", f.caPresta, "sub"],
@@ -132,28 +137,42 @@ export default function Projets({ projects, filters, selectedKey, go, reload, se
                   </span>
                 </div>
               </div>
-              <div><div className="k">Jours consommés {year}</div><div className="v">{fr(Math.round(consoAn))}</div><div className="s">prévu à date {fr(Math.round(prevuADate))} · RAF {fr(Math.round(reste))} j</div></div>
+              <div><div className="k">Jours consommés {year}</div><div className="v">{fr(Math.round(consoAn))}</div><div className="s">prévu à date {fr(Math.round(prevuADate))} · RAF {year} {fr(Math.round(reste))} j</div></div>
               <div><div className="k">TJM cumulé</div><div className="v">{eur(Math.round(k.tjm?.cumul || 0))}</div><div className="s">PRJ moyen {eur(Math.round(k.prj?.cumul || 0))}</div></div>
             </div>
 
             <div className="g12">
-              <Block className="c5" title="Compte d'exploitation" note={`${PERIODS.find((x) => x.id === period)?.label || ""} ${year}`}>
-                <div className="card flush tw">
-                  <table>
-                    <tbody>
-                      {pl.map(([l, v, cls]) => (
-                        <tr key={l} className={cls}>
-                          <td>{l}</td>
-                          <td className="n">{keur(v)}</td>
-                          <td className="n mono">{f.ca ? pct(v / f.ca) : "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <Block
+                className="c6"
+                title={`CA net mensuel ${year} : réel et budgété`}
+                note={
+                  <div className="legend">
+                    <span><i className="sq" style={{ background: "var(--s1)" }} />Réel{refIndex < 11 ? " (clair : prévisionnel)" : ""}</span>
+                    {bf.hasBudget && <span><i className="sq" style={{ background: "var(--s3)" }} />Budgété</span>}
+                  </div>
+                }
+              >
+                <div className="card">
+                  <div className="bud">
+                    <div><span>CA net à date</span><b>{keur(bf.ca)}</b><small>{bf.hasBudget ? <>budget {keur(bf.budCa)} · <Ecart real={bf.ca} bud={bf.budCa} /></> : "pas de budget"}</small></div>
+                    <div><span>CA net {year}</span><b>{keur(bf.caAn)}</b><small>{bf.hasBudget ? <>budget {keur(bf.budCaAn)} · <Ecart real={bf.caAn} bud={bf.budCaAn} /></> : "réalisé + prévisionnel"}</small></div>
+                    <div><span>Facturé à date</span><b>{keur(factADate)}</b><small>{caBrutADate ? `${pct(factADate / caBrutADate, 0)} du CA brut à date` : "—"}</small></div>
+                  </div>
+                  <MonthBars
+                    year={year}
+                    refIndex={refIndex}
+                    label={`CA net mensuel réel et budgété ${p.key}`}
+                    fmt={(v) => keur(v)}
+                    tipFmt={(v) => keur(v)}
+                    series={[
+                      { name: "CA net réel", data: track.ca, color: "var(--s1)" },
+                      ...(bf.hasBudget ? [{ name: "CA net budgété", data: track.budCa, color: "var(--s3)", solid: true }] : []),
+                    ]}
+                  />
                 </div>
               </Block>
               <Block
-                className="c7"
+                className="c6"
                 title={`Taux de marge mensuel ${year} : réel et budgété`}
                 note={
                   <div className="legend">
@@ -198,6 +217,79 @@ export default function Projets({ projects, filters, selectedKey, go, reload, se
                 </div>
               </Block>
             </div>
+
+            <Block title={`Run et Build ${year}`} note="Jours Pilot par ligne de contrat (onglet Activité) classés par le regroupement du bon de commande · marge estimée avec le PRJ moyen">
+              <div className="card">
+                {rb.classe ? (
+                  <>
+                    <div className="split" style={{ height: 14, marginBottom: 10 }} role="img" aria-label={`Run ${fr(Math.round(rb.run.total))} j, Build ${fr(Math.round(rb.build.total))} j`}>
+                      <span style={{ width: `${(rb.run.total / (rb.run.total + rb.build.total + rb.autre.reel || 1)) * 100}%`, background: "var(--s1)" }} />
+                      <span style={{ width: `${(rb.build.total / (rb.run.total + rb.build.total + rb.autre.reel || 1)) * 100}%`, background: "var(--s2)" }} />
+                    </div>
+                    <div className="tw">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Type</th><th className="n">Jours réalisés</th><th className="n">Jours prévus</th><th className="n">Total {year}</th>
+                            <th className="n">TJM vendu</th><th className="n">CA estimé</th><th className="n">Coût estimé</th><th className="n">Marge estimée</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[["run", "Run", "var(--s1)"], ["build", "Build", "var(--s2)"]].map(([t, l, c]) => {
+                            const o = rb[t];
+                            return (
+                              <tr key={t}>
+                                <td><i className="sw" style={{ background: c }} />{l}</td>
+                                <td className="n">{fr(Math.round(o.reel))}</td>
+                                <td className="n">{fr(Math.round(o.prevu))}</td>
+                                <td className="n"><b>{fr(Math.round(o.total))}</b></td>
+                                <td className="n">{o.tjm ? eur(Math.round(o.tjm)) : "—"}</td>
+                                <td className="n">{o.total ? keur(o.ca) : "—"}</td>
+                                <td className="n">{o.total ? keur(o.cout) : "—"}</td>
+                                <td className="n">{o.total ? <>{keur(o.marge)} · <b>{o.taux != null ? pct(o.taux) : "—"}</b></> : "—"}</td>
+                              </tr>
+                            );
+                          })}
+                          {rb.autre.reel > 0 && (
+                            <tr className="muted"><td><i className="sw" style={{ background: "var(--none-bg)" }} />Non classé</td><td className="n">{fr(Math.round(rb.autre.reel))}</td><td className="n">—</td><td className="n">{fr(Math.round(rb.autre.reel))}</td><td className="n" /><td className="n" /><td className="n" /><td className="n" /></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="hint" style={{ margin: "6px 0 0" }}>
+                      Jours prévus : reste à faire {year} de l'onglet Activité ({fr(Math.round(reste))} j) réparti au prorata du réalisé Run / Build. CA estimé = jours × TJM vendu
+                      des BC du type (hors achats et frais) ; coût estimé = jours × PRJ moyen du projet ({eur(Math.round(rb.prj))}).
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted">
+                    {rb.hasData
+                      ? "Aucune ligne de contrat classée Run ou Build : indiquez RUN ou BUILD dans la colonne « Regrp. » des bons de commande (ou la colonne Regroup de l'onglet Activité)."
+                      : "Aucune consommation par ligne de contrat dans l'onglet Activité de ce CEP."}
+                  </p>
+                )}
+              </div>
+            </Block>
+
+            <Block title="Compte d'exploitation" note={`${PERIODS.find((x) => x.id === period)?.label || ""} ${year}`}>
+              <div className="g12" style={{ gap: 16 }}>
+                {[pl.slice(0, plSplit), pl.slice(plSplit)].map((rows, i) => (
+                  <div key={i} className="c6 card flush tw">
+                    <table>
+                      <tbody>
+                        {rows.map(([l, v, cls]) => (
+                          <tr key={l} className={cls}>
+                            <td>{l}</td>
+                            <td className="n">{keur(v)}</td>
+                            <td className="n mono">{f.ca ? pct(v / f.ca) : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </div>
+            </Block>
 
             <div className="card flush">
               <div className="subtabs" role="tablist">
@@ -244,7 +336,7 @@ function Bons({ p }) {
   return (
     <table>
       <thead>
-        <tr><th>Id</th><th>N° de BC</th><th>Intitulé</th><th className="n">Jours vendus</th><th className="n">CA vendu brut</th><th className="n">TJM vendu</th><th className="n">Jours objectif</th><th>Facturé client</th></tr>
+        <tr><th>Id</th><th>N° de BC</th><th>Intitulé</th><th>Regroupement</th><th className="n">Jours vendus</th><th className="n">CA vendu brut</th><th className="n">TJM vendu</th><th className="n">Jours objectif</th><th>Facturé client</th></tr>
       </thead>
       <tbody>
         {p.bons.map((b, i) => (
@@ -252,6 +344,7 @@ function Bons({ p }) {
             <td className="mono">{b.id}</td>
             <td className="mono">{b.numero || "—"}</td>
             <td>{b.intitule || "—"}</td>
+            <td>{b.regroupement || "—"}{bcType(b) && <span className="muted"> · {bcType(b) === "run" ? "Run" : "Build"}</span>}</td>
             <td className="n">{fr(b.joursVendus)}</td>
             <td className="n">{keur(b.caVendu)}</td>
             <td className="n">{eur(Math.round(b.tjmVendu))}</td>
@@ -259,7 +352,7 @@ function Bons({ p }) {
             <td>{b.factureClient || "—"}</td>
           </tr>
         ))}
-        <tr className="hl"><td>Total</td><td /><td /><td className="n">{fr(t.j)}</td><td className="n">{keur(t.ca)}</td><td className="n">{t.j ? eur(Math.round(t.ca / t.j)) : "—"}</td><td className="n">{fr(t.o)}</td><td /></tr>
+        <tr className="hl"><td>Total</td><td /><td /><td /><td className="n">{fr(t.j)}</td><td className="n">{keur(t.ca)}</td><td className="n">{t.j ? eur(Math.round(t.ca / t.j)) : "—"}</td><td className="n">{fr(t.o)}</td><td /></tr>
       </tbody>
     </table>
   );

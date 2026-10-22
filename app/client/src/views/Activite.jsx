@@ -33,7 +33,7 @@ export default function Activite({ projects, filters, go }) {
   const budADate = projects.reduce((a, p) => a + joursBudget(p, year, true), 0);
   const budAn = projects.reduce((a, p) => a + joursBudget(p, year), 0);
   const atterr = projects.reduce((a, p) => a + joursAtterrissage(p, year), 0);
-  const raf = projects.reduce((a, p) => a + rafOf(p), 0);
+  const raf = projects.reduce((a, p) => a + rafOf(p, year), 0);
   const gains = projects.map((p) => ({ p, g: gainIa(p, year) })).filter((x) => x.g.annee || x.g.projet).sort((a, b) => b.g.annee - a.g.annee);
   const gainM = months.map((m) => projects.reduce((a, p) => a + gainIaAt(p, m), 0));
   const gainTot = gains.reduce((a, x) => ({ realise: a.realise + x.g.realise, prevu: a.prevu + x.g.prevu, annee: a.annee + x.g.annee, projet: a.projet + x.g.projet }), { realise: 0, prevu: 0, annee: 0, projet: 0 });
@@ -67,6 +67,28 @@ export default function Activite({ projects, filters, go }) {
     return rows.sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
   }, [projects, year]);
 
+  // Répartition de chaque collaborateur entre les projets : jours Pilot réalisés de l'année, sans prévisionnel.
+  const split = useMemo(() => {
+    const map = new Map();
+    for (const p of projects)
+      for (const e of p.activite?.equipe || []) {
+        const v = months.reduce((a, m) => a + (!p.moisRef || m <= p.moisRef ? e.jours[m] || 0 : 0), 0);
+        if (v <= 0) continue;
+        const id = e.trigramme || e.nom;
+        const r = map.get(id) || { id, trig: e.trigramme, nom: e.nom, role: e.role, total: 0, by: new Map() };
+        r.total += v;
+        r.by.set(p.key, (r.by.get(p.key) || 0) + v);
+        map.set(id, r);
+      }
+    const rows = [...map.values()].map((r) => ({ ...r, parts: [...r.by.entries()].sort((a, b) => b[1] - a[1]) }));
+    rows.sort((a, b) => b.parts.length - a.parts.length || a.nom.localeCompare(b.nom, "fr"));
+    // Une couleur par projet pour les 5 projets les plus consommés, les autres en gris.
+    const byProject = new Map();
+    for (const r of rows) for (const [k, v] of r.parts) byProject.set(k, (byProject.get(k) || 0) + v);
+    const colors = new Map([...byProject.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([k], i) => [k, `var(--s${i + 1})`]));
+    return { rows, colors, others: byProject.size > 5 };
+  }, [projects, year]);
+
   const band = (
     <Band
       eyebrow={`Jours consommés Pilot comparés au prévisionnel · ${projects.length} projet${projects.length > 1 ? "s" : ""} · exercice ${year}`}
@@ -86,7 +108,7 @@ export default function Activite({ projects, filters, go }) {
           v: `${fr(Math.round(atterr))} j`,
           d: budAn ? <>budget {fr(Math.round(budAn))} j <GapJ real={atterr} bud={budAn} /></> : "réalisé + prévisionnel de l'onglet Activité",
         },
-        { k: "Reste à faire", v: `${fr(Math.round(raf))} j`, d: "prévisionnel de l'onglet Activité après le mois de référence" },
+        { k: "Reste à faire", v: `${fr(Math.round(raf))} j`, d: `prévisionnel ${year} de l'onglet Activité après le mois de référence` },
 
       ]}
     />
@@ -162,14 +184,14 @@ export default function Activite({ projects, filters, go }) {
                     <tr>
                       <th>Projet</th><th className="n">Consommés à date</th><th className="n">Budget à date</th><th className="n">Écart</th>
                       <th className="n">Atterrissage {year}</th><th className="n">Budget {year}</th><th className="n">Écart</th>
-                      <th className="n">Reste à faire</th><th>Jours / mois {year}</th><th className="n">Gain IA {year}</th>
+                      <th className="n">Reste à faire {year}</th><th>Jours / mois {year}</th><th className="n">Gain IA {year}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {projects.map((p) => {
                       const real = months.reduce((a, m) => a + pilotAt(p, m), 0);
                       const bd = joursBudget(p, year, true), ba = joursBudget(p, year), at = joursAtterrissage(p, year);
-                      const rafDetail = Object.entries(p.activite?.joursPrev || {}).filter(([m, v]) => m > (p.moisRef || "") && v).map(([m, v]) => `${monthLabel(m)} : ${fr(v, 1)} j`).join("\n");
+                      const rafDetail = months.map((m) => [m, p.activite?.joursPrev?.[m] || 0]).filter(([m, v]) => m > (p.moisRef || "") && v).map(([m, v]) => `${monthLabel(m)} : ${fr(v, 1)} j`).join("\n");
                       const series = months.map((m) => (!p.moisRef || m <= p.moisRef ? pilotAt(p, m) : p.activite?.joursPrev?.[m] || 0));
                       const g = gainIa(p, year);
                       return (
@@ -181,7 +203,7 @@ export default function Activite({ projects, filters, go }) {
                           <td className="n">{fr(Math.round(at))}</td>
                           <td className="n">{ba ? fr(Math.round(ba)) : "—"}</td>
                           <td className="n"><GapJ real={at} bud={ba} /></td>
-                          <td className="n" title={rafDetail ? `Prévisionnel après ${monthLabel(p.moisRef)} :\n${rafDetail}` : undefined}>{fr(Math.round(rafOf(p)))}</td>
+                          <td className="n" title={rafDetail ? `Prévisionnel après ${monthLabel(p.moisRef)} :\n${rafDetail}` : undefined}>{fr(Math.round(rafOf(p, year)))}</td>
                           <td><Spark data={series} refIndex={p.moisRef?.startsWith(`${year}-`) ? Number(p.moisRef.slice(5)) - 1 : 11} label={`Jours par mois ${p.key}`} /></td>
                           <td className="n">{g.annee ? `${fr(g.annee, 1)} j` : "—"}</td>
                         </tr>
@@ -189,6 +211,45 @@ export default function Activite({ projects, filters, go }) {
                     })}
                   </tbody>
                 </table>
+              </div>
+            </Block>
+
+            <Block
+              className="c12"
+              title="Répartition des collaborateurs par projet"
+              note={`Part des jours Pilot de chaque collaborateur, réalisé ${year} sans prévisionnel · un collaborateur = son trigramme sur tous les CEP`}
+            >
+              <div className="card flush tw">
+                {split.rows.length ? (
+                  <>
+                    <div className="legend" style={{ padding: "10px 12px 0" }}>
+                      {[...split.colors.entries()].map(([k, c]) => <span key={k}><i className="sq" style={{ background: c }} />{k}</span>)}
+                      {split.others && <span><i className="sq" style={{ background: "var(--none-bg)" }} />Autres projets</span>}
+                    </div>
+                    <table>
+                      <thead>
+                        <tr><th>Collaborateur</th><th>Rôle</th><th className="n">Jours Pilot {year}</th><th style={{ width: "30%" }}>Répartition</th><th>Projets</th></tr>
+                      </thead>
+                      <tbody>
+                        {split.rows.map((r) => (
+                          <tr key={r.id}>
+                            <td><span className="mono">{r.trig}</span> {r.nom}</td>
+                            <td>{r.role || "—"}</td>
+                            <td className="n">{fr(r.total, 1)}</td>
+                            <td>
+                              <div className="split" role="img" aria-label={r.parts.map(([k, v]) => `${k} ${pct(v / r.total, 0)}`).join(", ")}>
+                                {r.parts.map(([k, v]) => <span key={k} title={`${k} : ${fr(v, 1)} j (${pct(v / r.total, 0)})`} style={{ width: `${(v / r.total) * 100}%`, background: split.colors.get(k) || "var(--none-bg)" }} />)}
+                              </div>
+                            </td>
+                            <td style={{ whiteSpace: "normal" }}>{r.parts.map(([k, v]) => `${k} ${pct(v / r.total, 0)}`).join(" · ")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                ) : (
+                  <p className="muted" style={{ padding: 12 }}>Aucune consommation Pilot par collaborateur en {year}.</p>
+                )}
               </div>
             </Block>
 

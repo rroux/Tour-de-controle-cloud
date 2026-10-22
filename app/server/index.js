@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { APP_DIR, DATA_DIR } from "./storage.js";
+import { APP_DIR, DATA_DIR, readJson, writeJson } from "./storage.js";
 import { addSource, deleteSource, getConfig, publicConfig, updateSettings, updateSource } from "./config.js";
 import { getHistory, getProjects, runScan, scanStatus, testSource } from "./scanner.js";
 import { acceptBudgetRefs } from "./budgetRef.js";
@@ -22,6 +22,21 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(nex
 app.get("/api/projects", (req, res) => res.json(getProjects()));
 // Nouvelle version du CEP prise comme budget de référence : { keys?: [clé projet], year?: année }.
 app.post("/api/budget-refs/accept", (req, res) => res.json(acceptBudgetRefs(getProjects().projects, req.body || {})));
+
+// Constats de l'onglet Analyses acquittés : { [id]: { level, at } }, partagés par tous les utilisateurs.
+app.get("/api/acks", (req, res) => res.json(readJson("acks.json", {})));
+app.put("/api/acks/:id", (req, res) => {
+  const acks = readJson("acks.json", {});
+  acks[req.params.id] = { level: String(req.body?.level || ""), at: new Date().toISOString() };
+  writeJson("acks.json", acks);
+  res.json(acks);
+});
+app.delete("/api/acks/:id", (req, res) => {
+  const acks = readJson("acks.json", {});
+  delete acks[req.params.id];
+  writeJson("acks.json", acks);
+  res.json(acks);
+});
 
 app.get("/api/config", (req, res) => res.json({ ...publicConfig(), nextRun: nextRun(getConfig().schedule) }));
 app.put("/api/config", (req, res) => res.json({ ...updateSettings(req.body || {}), nextRun: nextRun(getConfig().schedule) }));

@@ -76,7 +76,9 @@ Le bouton **Scanner maintenant** lance un scan immédiat. L'**historique des sca
   - **Marge critique** : sous la moitié de l'objectif du projet.
   - **À surveiller** : sous l'objectif du projet.
 - **Jours budgétés** : « Conso mois » de la trajectoire initiale ; l'atterrissage de l'année = Pilot réalisé puis prévisionnel de l'onglet Activité.
-- **Reste à faire** : somme des jours prévus dans l'onglet Activité (zone prévisionnel) sur les mois après le mois de référence.
+- **Reste à faire** : somme des jours prévus dans l'onglet Activité (zone prévisionnel) sur les mois **de l'exercice filtré** après le mois de référence. La charge des années suivantes n'est pas comptée (RAF 2026 = octobre à décembre 2026 pour un CEP arrêté à fin septembre).
+- **Run et Build** (fiche projet) : jours Pilot de la zone « Consommation par ligne de contrat » de l'onglet Activité, classés **Run** ou **Build** selon le regroupement de la ligne (colonne Regroup), ou à défaut celui de son bon de commande (colonne « Regrp. », liste `PAR_Regroupement` à renommer RUN / BUILD dans le CEP). Un regroupement qui ne contient ni « RUN » ni « BUILD » est « Non classé ». Les jours prévus = reste à faire de l'exercice réparti au prorata du réalisé Run / Build. Marge estimée : CA = jours × TJM vendu des BC du type (hors achats et frais), coût = jours × PRJ moyen du projet.
+- **Répartition des collaborateurs** (Activité) : pour chaque collaborateur (trigramme), part de ses jours Pilot réalisés de l'exercice sur chaque projet, sans prévisionnel.
 - **Gain IA** : ligne `ZZZ_GAIN_IA` de l'onglet Activité (profil de l'onglet Équipe) : saisie du réalisé jusqu'au mois de référence (ou du prévisionnel si le réalisé est vide), prévisionnel ensuite. Le signe saisi n'a pas d'importance.
 - **Comparaison de deux années** (Synthèse) : « Comparer à » superpose une autre année sur le CA mensuel et le taux de marge.
 - **Contrôle MAJ** : pour le mois contrôlé (par défaut le mois précédent), un CEP est **à jour** quand tous ces points sont conformes :
@@ -93,7 +95,7 @@ Le bouton **Scanner maintenant** lance un scan immédiat. L'**historique des sca
 - **Réel contre budget** (Portefeuille DP, en taux de marge ; fiche projet) : pour les exercices avant le budget de référence, le budget est la **trajectoire initiale** de l'onglet Projection (« CA NET mois » et « Coûts mois »). La comparaison se fait sur la même base : CA net, et marge = CA net − coûts. Le réel est le réalisé jusqu'au mois de référence de chaque CEP, puis le prévisionnel du CEP. Un CEP sans trajectoire initiale enregistrée est affiché sans budget.
 - **Portefeuille DP** : les projets sont regroupés selon le directeur de projet du Sommaire (`SOM_DP`). La liste des DP, dans le rail de gauche, filtre aussi la Synthèse, les Projets et l'Activité.
 
-- **Analyses** : constats calculés dans l'application (rien n'est envoyé à l'extérieur), en 6 thèmes. Les seuils sont regroupés en tête de `client/src/analyses.js`.
+- **Analyses** : constats calculés dans l'application (rien n'est envoyé à l'extérieur), en 6 thèmes. Les seuils sont regroupés en tête de `client/src/analyses.js`. Un constat peut être **acquitté** : il passe dans le filtre « Acquittés » (enregistré dans `data/acks.json`, commun à tous les utilisateurs) et revient dans les constats à traiter s'il s'aggrave (À surveiller → Critique).
   - **Marge** : taux en baisse 3 mois de suite ; marge à date ou en fin d'année à plus de 3 pt sous le budget (critique au-delà de 8 pt) ; mois prévisionnels à plus de 5 pt au-dessus des mois réalisés.
   - **Charge et jours** : consommé à plus de 10 % au-dessus du budget à date, avec projection au rythme actuel ; prévisionnel vide alors que le projet continue ; reste à faire supérieur à 21 j par personne et par mois ; collaborateur à plus de 21 j par mois tous projets confondus.
   - **Facturation** : facturé à plus de 10 % sous le prévu à date ; plus de 15 % du CA reconnu non facturé ; au moins 2 mois sans facturation saisie.
@@ -109,8 +111,8 @@ L'extraction s'appuie sur les **noms définis** du modèle V11-20. Elle résiste
 |---|---|
 | Fiche projet, indicateurs | `SOM_*` (Sommaire) : client, projet, DP, CP, dates, TJM, PRJ, date de MAJ, mois de référence |
 | CA, coûts, marge mensuels | `CEP_Zone_CEP` : salaires, achats, sous-traitance, total charges, CA brut, RFA, CA net, marges |
-| Activité | `ACT_Zone_Equipe_Conso_Pilot` et `ACT_Zone_Equipe_Conso_Prev` : jours par collaborateur et par mois, reste à faire, ligne `ZZZ_GAIN_IA` (gain IA) |
-| Bons de commande | `BON_Zone_BC_Presta` |
+| Activité | `ACT_Zone_Equipe_Conso_Pilot` et `ACT_Zone_Equipe_Conso_Prev` : jours par collaborateur et par mois, reste à faire, ligne `ZZZ_GAIN_IA` (gain IA) ; `ACT_Zone_Conso_par_BC` : jours par ligne de contrat (Run / Build) |
+| Bons de commande | `BON_Zone_BC_Presta` (dont « Regrp. » pour Run / Build) |
 | Facturation | `FAC_Zone_Theorique_Instant`, `FAC_Zone_Reel_Instant` |
 | Budget (trajectoire initiale) | `BUD_Zone_Trajectoire_Initiale` (onglet Projection) : conso, CA net et coûts par mois ; `BUD_Date_Enreg_Trajectoire_Initiale` |
 | PAM | onglet PAM : seules les actions réellement saisies sont reprises |

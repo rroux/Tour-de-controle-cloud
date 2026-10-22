@@ -85,16 +85,18 @@ function charge(p, year, out) {
     }
   }
   // Reste à faire vide ou impossible à absorber par l'équipe prévue.
+  // Vision de l'exercice : on s'arrête en décembre de l'année même si le projet continue après.
   const end = p.dateFin?.slice(0, 7);
-  if (end && p.moisRef && end > p.moisRef) {
-    const reste = raf(p);
-    const restants = Math.max(1, monthsBetween(p.moisRef, end));
-    if (reste <= 0) out.push({ theme: "charge", level: "crit", key: p.key, title: "Prévisionnel vide", text: `Aucun jour prévu après ${monthLabel(p.moisRef)} alors que le projet se termine en ${monthLabel(end)}.`, score: -1 });
+  const until = end && end < `${year}-12` ? end : `${year}-12`;
+  if (end && p.moisRef && until > p.moisRef) {
+    const reste = raf(p, year);
+    const restants = Math.max(1, monthsBetween(p.moisRef < `${year}-01` ? `${year - 1}-12` : p.moisRef, until));
+    if (reste <= 0) out.push({ theme: "charge", level: "crit", key: p.key, title: "Prévisionnel vide", text: `Aucun jour prévu en ${year} après ${monthLabel(p.moisRef)} alors que le projet se termine en ${monthLabel(end)}.`, score: -1 });
     else {
-      const team = (p.activite?.equipePrev || []).filter((e) => Object.entries(e.jours).some(([m, v]) => m > p.moisRef && v > 0)).length || 1;
+      const team = (p.activite?.equipePrev || []).filter((e) => Object.entries(e.jours).some(([m, v]) => m > p.moisRef && m <= until && v > 0)).length || 1;
       const parPers = reste / restants / team;
       if (parPers > T.joursMoisMax)
-        out.push({ theme: "charge", level: "warn", key: p.key, title: "Reste à faire difficile à absorber", text: `${fr(Math.round(reste))} j à faire en ${restants} mois avec ${team} personne${team > 1 ? "s" : ""} prévue${team > 1 ? "s" : ""}, soit ${fr(parPers, 1)} j par personne et par mois.`, score: -parPers / 100 });
+        out.push({ theme: "charge", level: "warn", key: p.key, title: "Reste à faire difficile à absorber", text: `${fr(Math.round(reste))} j à faire en ${restants} mois avec ${team} personne${team > 1 ? "s" : ""} prévue${team > 1 ? "s" : ""}, soit ${fr(parPers, 1)} j par personne et par mois d'ici ${monthLabel(until)}.`, score: -parPers / 100 });
     }
   }
 }
@@ -252,5 +254,10 @@ export function analyses(projects, year) {
   }
   surcharge(projects, year, out);
   portefeuille(projects, year, out);
+  // Identifiant stable d'un constat (pour l'acquitter) : les nombres du titre sont ignorés.
+  for (const a of out) a.id = [year, a.theme, a.key || a.dp || "", a.title.replace(/\d+/g, "#")].join("|");
   return out.sort((a, b) => RANK[a.level] - RANK[b.level] || a.score - b.score);
 }
+
+/** Un constat acquitté redevient à traiter s'il s'est aggravé depuis (ex. À surveiller → Critique). */
+export const isAcked = (a, acks) => Boolean(acks?.[a.id]) && RANK[a.level] >= (RANK[acks[a.id].level] ?? 0);

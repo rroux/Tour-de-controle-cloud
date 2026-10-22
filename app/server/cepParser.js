@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import * as XLSX from "xlsx";
 
 // Incrémenter quand l'extraction change : tous les fichiers sont alors relus au scan suivant.
-export const PARSER_VERSION = 6;
+export const PARSER_VERSION = 7;
 
 // ---------------------------------------------------------------------------
 // Lecture bas niveau
@@ -290,8 +290,33 @@ function extractActivite(book, months) {
     gainIaPilot[k] = Math.abs(gp?.jours[k] || 0);
     gainIaPrev[k] = Math.abs(gf?.jours[k] || 0);
   }
+  // Consommation par ligne de contrat : une ligne par bon de commande (Id interne), ou par regroupement
+  // de BC quand la colonne Regroup est renseignée. Jours Pilot saisis mois par mois.
+  const zb = book.ref("ACT_Zone_Conso_par_BC") || { r1: 78, r2: 92 };
+  const consoBc = [];
+  for (let r = zb.r1; r <= zb.r2 && ws; r++) {
+    const row = ws.getRow(r);
+    const jours = {};
+    let total = 0;
+    for (const [k, c] of Object.entries(cols)) {
+      jours[k] = num(row.getCell(c).value);
+      total += jours[k];
+    }
+    const rep = report ? num(row.getCell(report).value) : 0;
+    if (!total && !rep) continue;
+    consoBc.push({
+      ligne: r - zb.r1,
+      regroupement: str(row.getCell(2).value),
+      prod: str(row.getCell(3).value),
+      id: str(row.getCell(5).value),
+      libelle: str(row.getCell(6).value),
+      report: rep,
+      jours,
+    });
+  }
   const instant = book.ref("ACT_Zone_Jours_Instant");
   return {
+    consoBc,
     gainIaPilot,
     gainIaPrev,
     months: Object.keys(cols).sort(),
@@ -310,6 +335,8 @@ function extractBons(book) {
   for (let r = z.r1; r <= z.r2 && ws; r++) {
     const row = ws.getRow(r);
     const bc = {
+      ligne: r - z.r1,
+      prod: str(row.getCell(2).value),
       id: str(row.getCell(5).value),
       numero: str(row.getCell(6).value),
       regroupement: str(row.getCell(7).value),

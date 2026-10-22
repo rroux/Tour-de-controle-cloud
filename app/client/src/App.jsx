@@ -232,7 +232,7 @@ export default function App() {
         ) : route.view === "controle" ? (
           <Controle projects={selected} filters={filters} go={go} />
         ) : route.view === "analyses" ? (
-          <Analyses projects={selected} filters={filters} go={go} setDp={setDp} />
+          <Analyses projects={selected} filters={filters} go={go} setDp={setDp} setToast={setToast} />
         ) : (
           <Parametres scan={scan} startScan={startScan} reload={load} setToast={setToast} projects={projects} />
         ))}

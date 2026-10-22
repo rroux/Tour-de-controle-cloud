@@ -268,11 +268,11 @@ export function portfolioTrack(projects, year) {
 
 export const isReal = (p, m) => !p.moisRef || m <= p.moisRef;
 
-/** Reste à faire (jours) : somme du prévisionnel de l'onglet Activité sur les mois après le mois de référence. */
-export function raf(p) {
+/** Reste à faire (jours) de l'exercice : prévisionnel de l'onglet Activité sur les mois de `year` après le mois de référence. */
+export function raf(p, year) {
   const prev = p.activite?.joursPrev || {};
   const from = p.moisRef || currentMonth();
-  return Object.entries(prev).reduce((a, [m, v]) => a + (m > from ? v || 0 : 0), 0);
+  return yearMonths(year).reduce((a, m) => a + (m > from ? prev[m] || 0 : 0), 0);
 }
 
 /** Jours Pilot consommés sur l'année, jusqu'au mois de référence. */
@@ -406,4 +406,64 @@ export function updateControl(p, month) {
   const failed = checks.filter((c) => c.ok === false);
   const level = !active ? "off" : !checks[0].ok ? "late" : failed.length ? "partial" : "ok";
   return { month, monthLabel: lbl(month), checks, failed, level };
+}
+
+// ---------------------------------------------------------------------------
+// Run et Build : jours Pilot par ligne de contrat (onglet Activité) classés selon le regroupement
+// (« Regrp. ») du bon de commande. Le prévisionnel n'existe pas par ligne : le reste à faire de
+// l'exercice est réparti au prorata du réalisé.
+// ---------------------------------------------------------------------------
+
+const foldTxt = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** Type d'un regroupement : run, build ou null (non classé). */
+export function rbType(label) {
+  const f = foldTxt(label);
+  if (/\brun\b/.test(f)) return "run";
+  if (/\bbuild\b/.test(f)) return "build";
+  return null;
+}
+
+/** Type d'un bon de commande, d'après son regroupement. */
+export const bcType = (bc) => rbType(bc?.regroupement);
+
+/**
+ * Jours Run / Build d'un projet sur l'année et marge estimée :
+ * CA = jours × TJM vendu des BC du type (hors achats et frais), coût = jours × PRJ moyen du projet.
+ */
+export function runBuild(p, year) {
+  const months = yearMonths(year);
+  const bons = p.bons || [];
+  const lines = p.activite?.consoBc || [];
+  const out = { run: { reel: 0 }, build: { reel: 0 }, autre: { reel: 0 } };
+  const allTime = { run: 0, build: 0, autre: 0 };
+  for (const l of lines) {
+    const bc = (l.id && bons.find((b) => b.id === l.id)) || bons.find((b) => b.ligne === l.ligne);
+    const t = rbType(l.regroupement || bc?.regroupement) || "autre";
+    out[t].reel += months.reduce((a, m) => a + (isReal(p, m) ? l.jours[m] || 0 : 0), 0);
+    allTime[t] += Object.entries(l.jours).reduce((a, [m, v]) => a + (isReal(p, m) ? v || 0 : 0), l.report || 0);
+  }
+  // Prorata du réalisé de l'année, ou de tout le projet si rien n'est encore réalisé cette année.
+  const base = out.run.reel + out.build.reel ? { run: out.run.reel, build: out.build.reel } : allTime;
+  const classe = base.run + base.build;
+  const reste = classe ? raf(p, year) : 0;
+  const days = months.reduce((a, m) => a + (isReal(p, m) ? p.activite?.joursPilot?.[m] || 0 : 0), 0);
+  const salaires = months.reduce((a, m) => a + (isReal(p, m) ? p.cep?.rows?.salaires?.[m] || 0 : 0), 0);
+  const prj = p.kpi?.prj?.cumul || (days ? salaires / days : 0);
+  for (const t of ["run", "build"]) {
+    const o = out[t];
+    o.prevu = classe ? (reste * base[t]) / classe : 0;
+    o.total = o.reel + o.prevu;
+    const bs = bons.filter((b) => bcType(b) === t);
+    const jv = bs.reduce((a, b) => a + b.joursVendus, 0);
+    o.tjm = jv ? bs.reduce((a, b) => a + b.caVendu - b.achatsFrais, 0) / jv : p.kpi?.tjm?.cumul || 0;
+    o.ca = o.total * o.tjm;
+    o.cout = o.total * prj;
+    o.marge = o.ca - o.cout;
+    o.taux = o.ca ? o.marge / o.ca : null;
+  }
+  out.prj = prj;
+  out.hasData = lines.length > 0;
+  out.classe = classe > 0;
+  return out;
 }

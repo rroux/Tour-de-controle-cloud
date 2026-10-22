@@ -177,8 +177,18 @@ def build(template, out_dir, spec, rnd):
     wb["Paramètres"]["B5"] = 0.25
 
     bc = wb["Bons de commande"]
-    for i, (lib, part) in enumerate([("Lot 1 · cadrage", 0.2), ("Lot 2 · réalisation", 0.65), ("Avenant 1", 0.15)]):
+    # Regroupement « Regrp. » = RUN / BUILD : sert au calcul des jours Run et Build.
+    if fact == "Régie":
+        lots = [("TMA socle", 0.55, "RUN", "M"), ("Évolutions", 0.3, "BUILD", "F"), ("Avenant 1 · support", 0.15, "RUN", "M")]
+    else:
+        lots = [("Lot 1 · cadrage", 0.2, "BUILD", "F"), ("Lot 2 · réalisation", 0.65, "BUILD", "F"), ("Maintien en condition opérationnelle", 0.15, "RUN", "M")]
+    if code == "DEMO-ZETA":
+        lots = [(l, part, "", prod) for l, part, _, prod in lots]  # CEP sans regroupement : Run / Build non classés
+    for i, (lib, part, regrp, prod) in enumerate(lots):
         r = 3 + i
+        bc.cell(r, 2).value = prod
+        bc.cell(r, 5).value = f"BC{i + 1}"
+        bc.cell(r, 7).value = regrp or None
         bc.cell(r, 6).value = f"4500{rnd.randint(100000, 999999)}"
         bc.cell(r, 8).value = lib
         bc.cell(r, 9).value = round(jv * part)
@@ -188,6 +198,15 @@ def build(template, out_dir, spec, rnd):
         bc.cell(r, 13).value = tjm
         bc.cell(r, 19).value = tjm * 1.05
         bc.cell(r, 20).value = round(obj * part)
+
+    # Activité, consommation par ligne de contrat (lignes 78 et suivantes) : réalisé Pilot réparti entre les BC.
+    for i, (lib, part, regrp, prod) in enumerate(lots):
+        r = 78 + i
+        act.cell(r, 3).value, act.cell(r, 5).value, act.cell(r, 6).value = prod, f"BC{i + 1}", lib
+        for ym, c in acols.items():
+            act.cell(r, c).value = round(day_tot.get(ym, 0) * part, 1) if ym <= ref else 0
+        if arep:
+            act.cell(r, arep).value = round(report["cap"] / tjm * part, 1)
 
     fac = wb["Facturation"]
     fcols = month_cols(fac, 1)
