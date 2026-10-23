@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import Band from "../components/Band.jsx";
-import { Lines, MonthBars } from "../components/charts.jsx";
+import BudgetTrack, { cumRate } from "../components/BudgetTrack.jsx";
 import { Block, Empty, Pill, Status } from "../components/ui.jsx";
 import { fr, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
 import { alerts as buildAlerts, budgetFigures, budgetLabel, controlMonth, cumulate, figures, portfolioObjective, portfolioRef, portfolioTrack, status, totalBudgetFigures, updateControl } from "../model.js";
@@ -104,61 +104,9 @@ export default function Portefeuille({ projects, data, filters, go }) {
     );
   }
 
-  // Taux de marge cumulé depuis janvier : marge cumulée / CA net cumulé.
-  const cumRate = (m, c) => {
-    const cm = cumulate(m), cc = cumulate(c);
-    return cm.map((v, i) => (cc[i] ? v / cc[i] : null));
-  };
   const pctAxis = (v) => pct(v, 0);
-  // `monthly` : { real, bud, fmt, tipFmt } — barres mois par mois réel / budget sous la courbe des cumuls.
-  const chart = (title, real, bud, opts = {}, monthly = null) => (
-    <Block
-      title={title}
-      note={
-        <div className="legend">
-          <span><i style={{ borderColor: "var(--s1)" }} />Réel{refIndex < 11 ? " puis prévisionnel" : ""}</span>
-          <span><i className="dash" style={{ borderColor: "var(--ink-3)" }} />Budget</span>
-        </div>
-      }
-    >
-      <div className="card">
-        {budgetOk ? null : <p className="banner">Aucun CEP de ce portefeuille n'a de {budgetLabel(year)} pour {year} : seul le réel est affiché.</p>}
-        <Lines
-          year={year}
-          refIndex={refIndex}
-          fmt={opts.fmt || keur}
-          axisFmt={opts.axisFmt || opts.fmt || keur}
-          label={`${title}, cumul ${year}`}
-          series={[
-            { name: "Réel", data: real, color: "var(--s1)", area: !opts.rate, split: true },
-            ...(budgetOk ? [{ name: "Budget", data: bud, color: "var(--ink-3)", dash: true, thin: true }] : []),
-          ]}
-          extraRows={(i) =>
-            budgetOk && real[i] != null && bud[i] != null
-              ? [["Écart", opts.rate ? `${signed((real[i] - bud[i]) * 100, (v) => fr(v, 1))} pt` : signed(real[i] - bud[i], keur)]]
-              : []
-          }
-        />
-        {monthly && (
-          <>
-            <div className="chart-sub">Mois par mois</div>
-            <MonthBars
-              year={year}
-              refIndex={refIndex}
-              height={160}
-              label={`${title}, mois par mois ${year}`}
-              fmt={monthly.fmt}
-              tipFmt={monthly.tipFmt}
-              series={[
-                { name: "Réel", data: monthly.real, color: "var(--s1)" },
-                ...(budgetOk ? [{ name: "Budget", data: monthly.bud, color: "var(--s3)", solid: true }] : []),
-              ]}
-              extraRows={(i) => (budgetOk ? [["Écart", monthly.gap(i)]] : [])}
-            />
-          </>
-        )}
-      </div>
-    </Block>
+  const chart = (title, real, bud, opts, monthly) => (
+    <BudgetTrack title={title} year={year} refIndex={refIndex} real={real} bud={bud} budgetOk={budgetOk} opts={opts} monthly={monthly} />
   );
 
   return (

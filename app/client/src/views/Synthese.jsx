@@ -1,9 +1,10 @@
 import React, { useMemo } from "react";
 import Band from "../components/Band.jsx";
+import BudgetTrack from "../components/BudgetTrack.jsx";
 import { MarginLine, MonthBars } from "../components/charts.jsx";
 import { Block, Empty, Pill, Status } from "../components/ui.jsx";
 import { fr, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { alerts as buildAlerts, budgetLabel, budgetOf, figures, gainIa, joursAnnee, joursBudget, monthly, portfolioObjective, portfolioRef, status, totalFigures, yearMonths } from "../model.js";
+import { alerts as buildAlerts, budgetLabel, budgetOf, cumulate, figures, gainIa, joursAnnee, joursBudget, monthly, portfolioObjective, portfolioRef, portfolioTrack, status, totalBudgetFigures, totalFigures, yearMonths } from "../model.js";
 
 // Position du mois de référence dans une année : 11 si l'année est entièrement réalisée, -1 si elle est à venir.
 const refIndexOf = (ref, year) => (ref && ref.startsWith(`${year}-`) ? Number(ref.slice(5)) - 1 : ref && ref < `${year}-01` ? -1 : 11);
@@ -47,6 +48,10 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
     [projects, year],
   );
   const maxCa = Math.max(1, ...rows.map((r) => r.f.ca));
+
+  // Sans comparaison : même graphique réel / budget que le Portefeuille DP (mêmes séries).
+  const track = useMemo(() => portfolioTrack(projects, year), [projects, year]);
+  const budgetOk = useMemo(() => totalBudgetFigures(projects, year).withBudget > 0, [projects, year]);
 
   const coM = monthly(projects, (p) => p.cep.rows.totalCharges, year);
   const cnM = monthly(projects, (p) => p.cep.rows.caNet, year);
@@ -141,8 +146,9 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
         {band}
 
         <div className="grid2">
+          {compare ? (
           <Block
-            title={compare ? `CA net mensuel : ${year} et ${compare}` : "CA net mensuel : réel et budgété"}
+            title={`CA net mensuel : ${year} et ${compare}`}
             note={
               <div className="legend">
                 <span><i className="sq" style={{ background: "var(--s1)" }} />Réel{compare ? ` ${year}` : ""}</span>
@@ -176,6 +182,23 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
               />
             </div>
           </Block>
+          ) : (
+            <BudgetTrack
+              title="Avancement du CA net : réel et budgété"
+              year={year}
+              refIndex={refIndex}
+              real={cumulate(track.ca)}
+              bud={cumulate(track.budCa)}
+              budgetOk={budgetOk}
+              monthly={{
+                real: track.ca,
+                bud: track.budCa,
+                fmt: (v) => `${fr(v / 1000)} k`,
+                tipFmt: keur,
+                gap: (i) => signed(track.ca[i] - track.budCa[i], keur),
+              }}
+            />
+          )}
           <Block
             title="Taux de marge"
             note={

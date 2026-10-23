@@ -254,6 +254,7 @@ export function MonthBars({ series, refIndex, fmt, tipFmt, label, year, extraRow
           return (
             <g key={m}>
               {series.map((s, k) => {
+                if (s.data[i] === null) return null; // pas de barre (ex. réel après le mois de référence)
                 const v = s.data[i] || 0;
                 const x = x0 + k * (each + gap);
                 const future = (s.refIndex != null ? i > s.refIndex : fut) && !s.solid;
@@ -272,7 +273,7 @@ export function MonthBars({ series, refIndex, fmt, tipFmt, label, year, extraRow
                 height={H - T - B}
                 fill="transparent"
                 onMouseMove={(e) =>
-                  show(e, <TipRows title={`${MONTHS[i]} ${year}${fut ? " · prévisionnel" : ""}`} rows={[...series.map((s) => [s.name, tipFmt(s.data[i] || 0)]), ...(extraRows ? extraRows(i) : [])]} />)
+                  show(e, <TipRows title={`${MONTHS[i]} ${year}${fut ? " · prévisionnel" : ""}`} rows={[...series.filter((s) => s.data[i] !== null).map((s) => [s.name, tipFmt(s.data[i] || 0)]), ...(extraRows ? extraRows(i) : [])]} />)
                 }
                 onMouseLeave={hide}
               />
