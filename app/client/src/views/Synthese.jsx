@@ -298,7 +298,7 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
         </div>
 
         <div className="stack">
-          <div ref={tableRef} style={{ scrollMarginTop: 16 }}>
+          <div ref={tableRef} style={{ scrollMarginTop: 110 }}>
           <Block
             title={ym ? `Projets · ${monthLabel(ym)}` : "Projets"}
             note={
