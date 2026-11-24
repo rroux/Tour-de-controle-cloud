@@ -2,8 +2,8 @@ import React from "react";
 import { PERIODS } from "../model.js";
 import { Seg } from "./ui.jsx";
 
-/** En-tête de page : titre, filtres globaux à droite, puis une rangée de cartes KPI (les deux premières mises en avant). */
-export default function Band({ eyebrow, title, figures, filters, showPeriod = true, showCompare = false }) {
+/** En-tête de page : titre, filtres globaux à droite, `strip` facultatif (frise des mois), puis une rangée de cartes KPI (les deux premières mises en avant). */
+export default function Band({ eyebrow, title, figures, filters, showPeriod = true, showCompare = false, strip = null }) {
   return (
     <>
       <header className="top">
@@ -48,9 +48,10 @@ export default function Band({ eyebrow, title, figures, filters, showPeriod = tr
           {showPeriod && <Seg label="Période" options={PERIODS} value={filters.period} onChange={filters.setPeriod} />}
         </div>
       </header>
+      {strip}
       <div className="kpis">
         {figures.map((f, i) => (
-          <div className={`kpi${i < 2 ? " hero" : ""}`} key={f.k}>
+          <div className={`kpi${i < 2 ? " hero" : ""}`} key={i}>
             <span className="lbl">{f.k}</span>
             <span className="val">
               {f.v}

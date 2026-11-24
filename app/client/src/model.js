@@ -53,8 +53,9 @@ export function portfolioRef(projects) {
   return refs[refs.length - 1] || null;
 }
 
-/** Mois retenus pour un projet selon la période ; `report` indique s'il faut ajouter le « Report avant ». */
+/** Mois retenus pour un projet selon la période (ou un mois « AAAA-MM ») ; `report` indique s'il faut ajouter le « Report avant ». */
 export function periodMonths(p, period, year) {
+  if (/^\d{4}-\d{2}$/.test(period)) return { months: [period], report: false };
   const all = p.cep?.months || [];
   const inYear = all.filter((m) => m.startsWith(`${year}-`));
   if (period === "annee") return { months: inYear, report: false };

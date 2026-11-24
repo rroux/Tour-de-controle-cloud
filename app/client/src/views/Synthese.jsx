@@ -1,10 +1,11 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Band from "../components/Band.jsx";
 import BudgetTrack from "../components/BudgetTrack.jsx";
+import MonthStrip from "../components/MonthStrip.jsx";
 import { MarginLine, MonthBars } from "../components/charts.jsx";
 import { Block, Empty, Pill, Status } from "../components/ui.jsx";
 import { fr, keur, monthLabel, MONTHS, pct, signed } from "../format.js";
-import { alerts as buildAlerts, budgetLabel, budgetOf, cumulate, figures, gainIa, joursAnnee, joursBudget, monthly, portfolioObjective, portfolioRef, portfolioTrack, status, totalBudgetFigures, totalFigures, yearMonths } from "../model.js";
+import { alerts as buildAlerts, budgetLabel, budgetOf, cumulate, figures, gainIa, isReal, joursAnnee, joursBudget, monthly, portfolioObjective, portfolioRef, portfolioTrack, status, totalBudgetFigures, totalFigures, yearMonths } from "../model.js";
 
 // Position du mois de référence dans une année : 11 si l'année est entièrement réalisée, -1 si elle est à venir.
 const refIndexOf = (ref, year) => (ref && ref.startsWith(`${year}-`) ? Number(ref.slice(5)) - 1 : ref && ref < `${year}-01` ? -1 : 11);
@@ -17,6 +18,15 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
   const ref = portfolioRef(projects);
   const months = yearMonths(year);
   const refIndex = refIndexOf(ref, year);
+  // Mois choisi dans la frise (0-11) : cartes du bandeau et tableau des projets sur ce seul mois.
+  const [month, setMonth] = useState(null);
+  useEffect(() => setMonth(null), [year]);
+  const ym = month != null ? months[month] : null;
+  const tableRef = useRef(null);
+  const pickMonth = (i) => {
+    setMonth(i);
+    if (i != null) requestAnimationFrame(() => tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
 
   const tot = useMemo(() => totalFigures(projects, PERIOD, year), [projects, year]);
   const caRealise = useMemo(() => totalFigures(projects, "realise", year).ca, [projects, year]);
@@ -37,15 +47,17 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
     return { realise: a.realise + g.realise, annee: a.annee + g.annee, n: a.n + (g.annee > 0 ? 1 : 0) };
   }, { realise: 0, annee: 0, n: 0 });
 
+  // Sur un mois, seuls les projets ayant du CA ou des coûts ce mois-là.
   const rows = useMemo(
     () =>
       projects
         .map((p) => {
-          const f = figures(p, PERIOD, year);
+          const f = figures(p, ym || PERIOD, year);
           return { p, f, s: status(p, f) };
         })
+        .filter((r) => !ym || r.f.ca || r.f.couts)
         .sort((a, b) => b.f.ca - a.f.ca),
-    [projects, year],
+    [projects, year, ym],
   );
   const maxCa = Math.max(1, ...rows.map((r) => r.f.ca));
 
@@ -63,6 +75,55 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
   const cmpCo = compare ? monthly(projects, (p) => p.cep.rows.totalCharges, compare) : null;
   const cmpCn = compare ? monthly(projects, (p) => p.cep.rows.caNet, compare) : null;
   const cmpRef = compare ? refIndexOf(ref, compare) : null;
+  const caM = monthly(projects, (p) => p.cep.rows.caBrut, year);
+  const budCoM = monthly(projects, (p) => budgetOf(p, year).couts, year);
+
+  // Cartes du mois choisi : réalisé jusqu'au mois de référence, prévisionnel du CEP ensuite.
+  let monthFigs = null;
+  if (ym) {
+    const real = month <= refIndex;
+    const tag = <span className={`mtag ${real ? "real" : "prev"}`}>{real ? "Réalisé" : "Prévisionnel"}</span>;
+    const lab = monthLabel(ym);
+    const m = totalFigures(projects, ym, year);
+    const mTaux = m.caNet ? (m.caNet - m.couts) / m.caNet : 0;
+    const n1 = totalFigures(projects, `${year - 1}${ym.slice(4)}`, year - 1).ca;
+    const budCn = budCaM[ym], budCo = budCoM[ym];
+    const upto = months.slice(0, month + 1);
+    const cum = (o) => upto.reduce((a, k) => a + (o[k] || 0), 0);
+    const cumCn = cum(cnM), cumCo = cum(coM), cumBud = cum(budCaM);
+    const jours = projects.reduce((a, p) => a + ((isReal(p, ym) ? p.activite?.joursPilot : p.activite?.joursPrev)?.[ym] || 0), 0);
+    const joursBud = projects.reduce((a, p) => a + (budgetOf(p, year).conso?.[ym] || 0), 0);
+    const vs = (v, b, what) => (b ? <span className={v >= b ? "delta-up" : "delta-down"}>{v >= b ? "▲" : "▼"} {pct(Math.abs((v - b) / b))} {what}</span> : null);
+    monthFigs = [
+      {
+        k: <>CA brut {lab} {tag}</>,
+        v: keur(m.ca),
+        d: <>CA net {keur(m.caNet)}{vs(m.ca, n1, `vs ${monthLabel(`${year - 1}${ym.slice(4)}`)}`)}{vs(m.caNet, budCn, "vs budget")}</>,
+      },
+      {
+        k: <>Marge {lab} {tag}</>,
+        v: pct(mTaux),
+        d: (
+          <>
+            {keur(m.caNet - m.couts)} sur CA net
+            <span className={mTaux >= obj.value ? "delta-up" : "delta-down"}>{mTaux >= obj.value ? "▲" : "▼"} {fr(Math.abs(mTaux - obj.value) * 100, 1)} pt vs objectif {pct(obj.value)}</span>
+            {budCn ? <span className="muted"> · budget {pct((budCn - budCo) / budCn)}</span> : null}
+          </>
+        ),
+      },
+      {
+        k: `Cumul à fin ${lab}`,
+        v: keur(cum(caM)),
+        d: <>marge {pct(cumCn ? (cumCn - cumCo) / cumCn : 0)} sur CA net{vs(cumCn, cumBud, "vs budget à date")}</>,
+      },
+      {
+        k: `Jours ${real ? "consommés" : "prévus"} ${lab}`,
+        v: fr(Math.round(jours)),
+        d: joursBud ? <>{budgetLabel(year)} {fr(Math.round(joursBud))} j</> : `${budgetLabel(year)} non disponible`,
+      },
+    ];
+  }
+
   const alertList = buildAlerts(projects, data.errors, PERIOD, year, data.staleDays);
 
   const band = (
@@ -72,7 +133,8 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
       filters={filters}
       showPeriod={false}
       showCompare
-      figures={[
+      strip={<MonthStrip year={year} values={months.map((k) => caM[k])} refIndex={refIndex} selected={month} onSelect={pickMonth} fmt={(v) => fr(Math.round(v / 1000))} />}
+      figures={monthFigs || [
         {
           k: `CA brut ${year}`,
           v: keur(tot.ca),
@@ -236,18 +298,32 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
         </div>
 
         <div className="stack">
-          <Block title="Projets" note={`Triés par CA ${year} · marge sur CA net comparée à l'objectif du projet`}>
+          <div ref={tableRef} style={{ scrollMarginTop: 16 }}>
+          <Block
+            title={ym ? `Projets · ${monthLabel(ym)}` : "Projets"}
+            note={
+              ym ? (
+                <>
+                  {rows.length} projet{rows.length > 1 ? "s" : ""} avec du CA ou des coûts ce mois · marge sur CA net{" "}
+                  <button type="button" className="btn small" onClick={() => setMonth(null)}>Revenir à l'année</button>
+                </>
+              ) : (
+                `Triés par CA ${year} · marge sur CA net comparée à l'objectif du projet`
+              )
+            }
+          >
             <div className="card flush tw">
               <table>
                 <thead>
                   <tr>
                     <th>Projet</th>
-                    <th className="n">CA {year}</th>
+                    <th className="n">CA {ym ? monthLabel(ym) : year}</th>
                     <th />
                     <th className="n">Marge</th>
                     <th className="n">Objectif</th>
                     <th className="n">Écart</th>
                     <th>État</th>
+                    {ym && <th>Données</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -265,12 +341,14 @@ export default function Synthese({ projects, data, filters, go, startScan }) {
                       <td className="n">{pct(f.obj)}</td>
                       <td className={`n ${f.tauxNet >= f.obj ? "delta-up" : "delta-down"}`}>{signed((f.tauxNet - f.obj) * 100, (v) => fr(v, 1))} pt</td>
                       <td><Status s={s} /></td>
+                      {ym && <td><span className={`mtag ${isReal(p, ym) ? "real" : "prev"}`}>{isReal(p, ym) ? "Réalisé" : "Prévisionnel"}</span></td>}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </Block>
+          </div>
           <Block title="Points d'attention">
             <div className="card">
               {alertList.length ? (

@@ -93,6 +93,21 @@ h1 { font-size: 22px; margin: 0; text-wrap: balance; }
 .kpi .lbl { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-3); font-weight: 600; }
 .kpi .val { font-family: var(--f-num); font-size: 26px; font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -.02em; overflow-wrap: anywhere; }
 .kpi .val small { font-size: 15px; margin-left: 4px; color: var(--ink-3); font-weight: 400; }
+/* frise des mois (Synthèse) : barre de CA brut par mois, hachurée pour le prévisionnel */
+.mstrip { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 8px 4px; }
+.mstrip button { all: unset; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0 2px; border-radius: 5px; min-width: 0; }
+.mstrip button:hover { background: var(--accent-soft); }
+.mstrip button[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
+.mstrip button:focus-visible { outline: 2px solid var(--accent); }
+.mstrip .mb { width: 60%; max-width: 30px; height: 40px; display: flex; align-items: flex-end; }
+.mstrip .mb i { display: block; width: 100%; border-radius: 3px 3px 0 0; background: var(--accent); }
+.mstrip .mb i.f { background: repeating-linear-gradient(135deg, var(--ink-3) 0 3px, transparent 3px 6px); opacity: .55; }
+.mstrip .mm { font-size: 11.5px; color: var(--ink-3); }
+.mstrip button[aria-pressed="true"] .mm { color: var(--ink); font-weight: 700; }
+.mstrip .mv { font-family: var(--f-num); font-size: 10.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.mtag { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.mtag.real { background: var(--good-bg); color: var(--good); }
+.mtag.prev { background: var(--warn-bg); color: var(--warn); }
 .kpi .meta { font-size: 12px; color: var(--ink-3); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .delta-up { color: var(--good); font-weight: 600; } .delta-down { color: var(--crit); font-weight: 600; }
 
@@ -246,7 +261,7 @@ mark { background: var(--accent-soft); color: var(--accent); font-weight: 600; p
 .facts .v { font-family: var(--f-num); font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
 .facts .s { font-size: 12px; color: var(--ink-3); }
 @media (max-width: 1100px) { .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 720px) { .facts .v { font-size: 20px; } }
+@media (max-width: 720px) { .facts .v { font-size: 20px; } .mstrip .mv { display: none; } }
 
 /* Synthèse : deux colonnes 1,6 / 1 comme la maquette A */
 .grid2 { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; }
